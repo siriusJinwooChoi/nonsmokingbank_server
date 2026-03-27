@@ -107,5 +107,54 @@ router.put("/pinned", async (req, res, next) => {
   }
 });
 
+router.put("/sync", async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const inputReasons = Array.isArray(req.body?.reasons) ? req.body.reasons : [];
+    const pinnedReasonText = normalizeText(req.body?.pinnedReasonText);
+    const selectedReasonId = normalizeText(req.body?.selectedReasonId) || null;
+    const selectedReasonText = normalizeText(req.body?.selectedReasonText) || null;
+
+    const reasons = inputReasons
+      .map((item, idx) => toReasonItem(item, idx + 1))
+      .filter((r) => normalizeText(r.text).length > 0);
+
+    // pinned 는 하나만 유지
+    let foundPinned = false;
+    for (const r of reasons) {
+      if (r.pinned && !foundPinned) {
+        foundPinned = true;
+      } else {
+        r.pinned = false;
+      }
+    }
+
+    const finalPinnedText =
+      pinnedReasonText || reasons.find((r) => r.pinned)?.text || null;
+
+    const { error } = await supabaseAdmin.from("reasons").upsert(
+      {
+        user_id: userId,
+        reasons_json: reasons,
+        pinned_reason_text: finalPinnedText,
+        selected_reason_id: selectedReasonId,
+        selected_reason_text: selectedReasonText,
+      },
+      { onConflict: "user_id" },
+    );
+    if (error) throw error;
+
+    return res.status(200).json({
+      ok: true,
+      reasons,
+      pinnedReasonText: finalPinnedText ?? "",
+      selectedReasonId,
+      selectedReasonText,
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 export default router;
 
