@@ -3,11 +3,13 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import { env, validateEnv } from "./config/env.js";
+import v1Router from "./routes/v1.js";
 
 const app = express();
 
-const port = Number(process.env.PORT || 3000);
-const nodeEnv = process.env.NODE_ENV || "development";
+validateEnv();
+const { port, nodeEnv } = env;
 
 app.use(helmet());
 app.use(cors());
@@ -31,10 +33,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// API version prefix placeholder
-app.get("/v1/health", (req, res) => {
-  res.status(200).json({ ok: true, version: "v1" });
-});
+app.use("/v1", v1Router);
 
 app.use((req, res) => {
   res.status(404).json({
