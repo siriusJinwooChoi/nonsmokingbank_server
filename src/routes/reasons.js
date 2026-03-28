@@ -59,7 +59,7 @@ router.put("/pinned", async (req, res, next) => {
 
     const { data: row, error: getErr } = await supabaseAdmin
       .from("reasons")
-      .select("reasons_json")
+      .select("reasons_json, selected_reason_id, selected_reason_text")
       .eq("user_id", userId)
       .maybeSingle();
     if (getErr) throw getErr;
@@ -68,32 +68,55 @@ router.put("/pinned", async (req, res, next) => {
     const list = existing.map((item, idx) => toReasonItem(item, idx + 1));
     const now = Date.now();
 
-    let target = list.find((r) => normalizeText(r.text) === text);
-    for (const r of list) r.pinned = false;
-
-    if (!target) {
-      const maxDisplay = list.reduce((m, r) => Math.max(m, Number(r.displayNumber || 0)), 0);
-      target = {
-        id: String(now),
-        text,
-        pinned: true,
-        createdAt: now,
-        displayNumber: maxDisplay + 1,
-      };
-      list.push(target);
-    } else {
-      target.text = text;
-      target.pinned = true;
+    /** 메인에서 문구만 바꿀 때 새 행이 생기지 않도록, 기존 고정 항목을 갱신 */
+    let previouslyPinned = null;
+    for (const r of list) {
+      if (r.pinned) {
+        previouslyPinned = r;
+        break;
+      }
     }
 
-    const { error: upsertErr } = await supabaseAdmin.from("reasons").upsert(
-      {
-        user_id: userId,
-        reasons_json: list,
-        pinned_reason_text: text,
-      },
-      { onConflict: "user_id" },
-    );
+    for (const r of list) {
+      r.pinned = false;
+    }
+
+    let target;
+    if (previouslyPinned) {
+      previouslyPinned.text = text;
+      previouslyPinned.pinned = true;
+      target = previouslyPinned;
+    } else {
+      target = list.find((r) => normalizeText(r.text) === text);
+      if (!target) {
+        const maxDisplay = list.reduce((m, r) => Math.max(m, Number(r.displayNumber || 0)), 0);
+        target = {
+          id: String(now),
+          text,
+          pinned: true,
+          createdAt: now,
+          displayNumber: maxDisplay + 1,
+        };
+        list.push(target);
+      } else {
+        target.text = text;
+        target.pinned = true;
+      }
+    }
+
+    const payload = {
+      user_id: userId,
+      reasons_json: list,
+      pinned_reason_text: text,
+    };
+    const selId = row?.selected_reason_id != null ? String(row.selected_reason_id) : null;
+    if (previouslyPinned && selId && previouslyPinned.id === selId) {
+      payload.selected_reason_text = text;
+    }
+
+    const { error: upsertErr } = await supabaseAdmin.from("reasons").upsert(payload, {
+      onConflict: "user_id",
+    });
     if (upsertErr) throw upsertErr;
 
     return res.status(200).json({
