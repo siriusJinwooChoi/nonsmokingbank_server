@@ -74,7 +74,7 @@ JWT_AUDIENCE=authenticated
 ## Render 배포
 
 - Runtime: **Node**
-- Build Command: `npm ci`
+- Build Command: `npm ci` (또는 대시보드에 `npm ci && npm run build` 로 되어 있으면 그대로 두어도 됩니다. `build` 는 문법 검사만 수행합니다.)
 - Start Command: `npm run start:prod`
 - Health Check Path: `/health`
 
