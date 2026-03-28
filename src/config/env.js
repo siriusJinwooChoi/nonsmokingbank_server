@@ -50,8 +50,16 @@ export const env = {
 export function validateEnv() {
   const missing = requiredVars.filter((k) => !String(readEnv(k)).trim());
   if (missing.length > 0) {
+    const supabaseLike = Object.keys(process.env).filter((k) =>
+      k.toUpperCase().includes("SUPABASE"),
+    );
+    const hint =
+      supabaseLike.length > 0
+        ? ` Render에서 설정된 SUPABASE 관련 키 이름: ${supabaseLike.join(", ")} (이름이 위 목록과 정확히 일치해야 합니다.)`
+        : "";
     throw new Error(
-      `Missing required env vars: ${missing.join(", ")}. Copy .env.example to .env and fill values.`,
+      `Missing required env vars: ${missing.join(", ")}. ` +
+        `로컬은 .env.example 을 참고하세요.${hint}`,
     );
   }
 }
