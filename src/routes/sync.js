@@ -1,4 +1,9 @@
 import { Router } from "express";
+import {
+  asDoubleOrNull,
+  asInt,
+  gameStatsFieldsChanged,
+} from "../lib/numbers.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
@@ -20,39 +25,6 @@ router.get("/onboarding", async (req, res, next) => {
     return next(err);
   }
 });
-
-function asInt(v, fallback = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
-
-function asDoubleOrNull(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function seqSecondsEqual(a, b) {
-  if (a == null || b == null) return false;
-  return Math.abs(Number(a) - Number(b)) < 0.02;
-}
-
-function gameStatsChanged(prev, incoming) {
-  if (!prev) return true;
-  const pSeq = prev.number_sequence_best_seconds;
-  const iSeq = incoming.number_sequence_best_seconds;
-  if (pSeq == null && iSeq == null) {
-    /* keep */
-  } else if (pSeq == null || iSeq == null) {
-    return true;
-  } else if (!seqSecondsEqual(pSeq, iSeq)) {
-    return true;
-  }
-  if (asInt(prev.word_game_level, 1) !== asInt(incoming.word_game_level, 1)) return true;
-  if (asInt(prev.timing_tap_best_score, 0) !== asInt(incoming.timing_tap_best_score, 0)) return true;
-  if (asInt(prev.cigarette_catch_best_stage, 0) !== asInt(incoming.cigarette_catch_best_stage, 0)) return true;
-  if (asInt(prev.cigarette_catch_best_score, 0) !== asInt(incoming.cigarette_catch_best_score, 0)) return true;
-  return false;
-}
 
 router.get("/pull", async (req, res, next) => {
   try {
@@ -237,7 +209,7 @@ router.put("/push", async (req, res, next) => {
       const prevRes = await supabaseAdmin.from("game_stats").select("*").eq("user_id", userId).maybeSingle();
       if (prevRes.error) throw prevRes.error;
       const prev = prevRes.data;
-      const changed = gameStatsChanged(prev, incoming);
+      const changed = gameStatsFieldsChanged(prev, incoming);
       const payload = {
         user_id: userId,
         ...incoming,

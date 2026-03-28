@@ -1,51 +1,15 @@
 import { Router } from "express";
 import { env } from "../config/env.js";
+import { ymdInSeoulNow } from "../lib/kstDate.js";
+import {
+  asDoubleOrNull,
+  asInt,
+  gameStatsFieldsChanged,
+  seqSecondsEqual,
+} from "../lib/numbers.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
-
-function asInt(v, fallback = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
-
-function asDoubleOrNull(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function ymdInSeoulNow() {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date());
-}
-
-function seqSecondsEqual(a, b) {
-  if (a == null || b == null) return false;
-  return Math.abs(Number(a) - Number(b)) < 0.02;
-}
-
-function statsRowChanged(prev, incoming) {
-  if (!prev) return true;
-  const pSeq = prev.number_sequence_best_seconds;
-  const iSeq = incoming.number_sequence_best_seconds;
-  if (pSeq == null && iSeq == null) {
-    // both null
-  } else if (pSeq == null || iSeq == null) {
-    return true;
-  } else if (!seqSecondsEqual(pSeq, iSeq)) {
-    return true;
-  }
-  if (asInt(prev.word_game_level, 1) !== asInt(incoming.word_game_level, 1)) return true;
-  if (asInt(prev.timing_tap_best_score, 0) !== asInt(incoming.timing_tap_best_score, 0)) return true;
-  if (asInt(prev.cigarette_catch_best_stage, 0) !== asInt(incoming.cigarette_catch_best_stage, 0)) return true;
-  if (asInt(prev.cigarette_catch_best_score, 0) !== asInt(incoming.cigarette_catch_best_score, 0)) return true;
-  return false;
-}
 
 function isStatsFresh(statsUpdatedAt, maxAgeMinutes) {
   if (!statsUpdatedAt) return false;
@@ -78,7 +42,7 @@ router.put("/stats", async (req, res, next) => {
     if (prevRes.error) throw prevRes.error;
     const prev = prevRes.data;
 
-    const changed = statsRowChanged(prev, incoming);
+    const changed = gameStatsFieldsChanged(prev, incoming);
     const payload = {
       user_id: userId,
       ...incoming,

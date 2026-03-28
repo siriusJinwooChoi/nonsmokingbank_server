@@ -27,7 +27,7 @@ export const env = {
   jwtIssuer: readEnv("JWT_ISSUER"),
   jwtAudience: String(readEnv("JWT_AUDIENCE", "authenticated")).trim() || "authenticated",
   /** 일일 게임 보상 1회 지급 코인 (Render 등에서 조정) */
-  gameRewardCoinsPerClaim: readIntEnv("GAME_REWARD_COINS_PER_CLAIM", 5, 1, 500),
+  gameRewardCoinsPerClaim: readIntEnv("GAME_REWARD_COINS_PER_CLAIM", 2, 1, 500),
   /** 보상 claim 시 허용하는 game_stats.stats_updated_at 최대 경과(분) */
   gameStatsFreshMinutes: readIntEnv("GAME_STATS_FRESH_MINUTES", 25, 5, 1440),
   /** 단어 게임 보상에 필요한 최소 레벨(서버 저장 레벨과 proof 일치 + 이 값 이상) */
@@ -59,7 +59,7 @@ export function validateEnv() {
         : "";
     throw new Error(
       `Missing required env vars: ${missing.join(", ")}. ` +
-        `로컬은 .env.example 을 참고하세요.${hint}`,
+        `로컬은 프로젝트 루트에 .env 를 두고 README의 환경 변수 항목을 참고하세요.${hint}`,
     );
   }
 }

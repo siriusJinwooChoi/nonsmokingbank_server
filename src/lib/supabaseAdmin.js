@@ -14,7 +14,7 @@ function ensureSupabaseAdmin() {
   if (!url || !key) {
     throw new Error(
       "SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY 가 비어 있습니다. " +
-        "프로젝트 루트에 .env 파일을 두고 값을 채우세요. (.env.example 참고)",
+        "프로젝트 루트에 .env 파일을 두고 값을 채우세요. (README 환경 변수 항목 참고)",
     );
   }
   _admin = createClient(url, key, {

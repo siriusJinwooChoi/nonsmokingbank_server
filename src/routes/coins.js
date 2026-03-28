@@ -1,12 +1,8 @@
 import { Router } from "express";
+import { asInt } from "../lib/numbers.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
-
-function asInt(v, fallback = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
 
 router.get("/balance", async (req, res, next) => {
   try {

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ymdInSeoulNow } from "../lib/kstDate.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
@@ -6,16 +7,6 @@ const router = Router();
 const MILESTONE_DAYS = new Set([7, 14, 21, 28]);
 const COINS_PER_DAY = 15;
 const COINS_MILESTONE = 20;
-
-function ymdInSeoulNow() {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date()); // yyyy-mm-dd
-}
 
 function parseYmd(s) {
   if (typeof s !== "string") return null;
