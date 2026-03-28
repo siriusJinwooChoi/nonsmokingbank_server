@@ -1,8 +1,7 @@
 const requiredVars = [
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",
-  "JWT_ISSUER",
-  "JWT_AUDIENCE",
+  "SUPABASE_ANON_KEY",
 ];
 
 function readEnv(name, fallback = "") {
@@ -23,8 +22,10 @@ export const env = {
   port: Number(readEnv("PORT", "3000")),
   supabaseUrl: readEnv("SUPABASE_URL"),
   supabaseServiceRoleKey: readEnv("SUPABASE_SERVICE_ROLE_KEY"),
+  /** GoTrue(로그인·OAuth PKCE 교환) — 앱에는 넣지 않고 서버만 보유 */
+  supabaseAnonKey: readEnv("SUPABASE_ANON_KEY"),
   jwtIssuer: readEnv("JWT_ISSUER"),
-  jwtAudience: readEnv("JWT_AUDIENCE", "authenticated"),
+  jwtAudience: String(readEnv("JWT_AUDIENCE", "authenticated")).trim() || "authenticated",
   /** 일일 게임 보상 1회 지급 코인 (Render 등에서 조정) */
   gameRewardCoinsPerClaim: readIntEnv("GAME_REWARD_COINS_PER_CLAIM", 5, 1, 500),
   /** 보상 claim 시 허용하는 game_stats.stats_updated_at 최대 경과(분) */
@@ -40,12 +41,18 @@ export const env = {
     1,
     10_000_000,
   ),
+  /**
+   * 앱 원격 에셋(이미지·Lottie) 정적 폴더. 비우면 기본값은 저장소의 public/app-assets (index.js에서 경로 조합).
+   */
+  assetsRoot: readEnv("ASSETS_ROOT", ""),
 };
 
 export function validateEnv() {
-  const missing = requiredVars.filter((k) => !readEnv(k));
+  const missing = requiredVars.filter((k) => !String(readEnv(k)).trim());
   if (missing.length > 0) {
-    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
+    throw new Error(
+      `Missing required env vars: ${missing.join(", ")}. Copy .env.example to .env and fill values.`,
+    );
   }
 }
 
