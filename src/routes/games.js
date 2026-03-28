@@ -1,13 +1,8 @@
 import { Router } from "express";
+import { env } from "../config/env.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
-
-/** 종목별 일일 1회 보상 코인 */
-const DAILY_GAME_REWARD_COINS = 5;
-
-/** stats_updated_at 이 이 시간 이내일 때만 보상 허용 (분) */
-const STATS_FRESH_MINUTES = 25;
 
 function asInt(v, fallback = 0) {
   const n = Number(v);
@@ -52,12 +47,12 @@ function statsRowChanged(prev, incoming) {
   return false;
 }
 
-function isStatsFresh(statsUpdatedAt) {
+function isStatsFresh(statsUpdatedAt, maxAgeMinutes) {
   if (!statsUpdatedAt) return false;
   const t = new Date(statsUpdatedAt).getTime();
   if (!Number.isFinite(t)) return false;
   const ageMs = Date.now() - t;
-  return ageMs >= 0 && ageMs <= STATS_FRESH_MINUTES * 60 * 1000;
+  return ageMs >= 0 && ageMs <= maxAgeMinutes * 60 * 1000;
 }
 
 router.put("/stats", async (req, res, next) => {
@@ -101,6 +96,18 @@ router.put("/stats", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
+});
+
+/** 앱·운영자가 현재 서버 보상 정책을 확인할 때 사용 (비밀값 없음) */
+router.get("/reward/settings", (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    rewardCoinsPerClaim: env.gameRewardCoinsPerClaim,
+    statsFreshMinutes: env.gameStatsFreshMinutes,
+    wordGameMinLevelForReward: env.wordGameMinLevelForReward,
+    timingTapMinBestScoreForReward: env.timingTapMinBestScoreForReward,
+    cigaretteCatchMinBestScoreForReward: env.cigaretteCatchMinBestScoreForReward,
+  });
 });
 
 /**
@@ -152,7 +159,7 @@ router.post("/reward/claim", async (req, res, next) => {
       return res.status(400).json({ error: "NO_STATS", message: "sync game stats first" });
     }
 
-    if (!isStatsFresh(stats.stats_updated_at)) {
+    if (!isStatsFresh(stats.stats_updated_at, env.gameStatsFreshMinutes)) {
       return res.status(400).json({
         error: "STALE_STATS",
         message: "game stats must be synced recently; call PUT /v1/games/stats then retry",
@@ -168,25 +175,37 @@ router.post("/reward/claim", async (req, res, next) => {
         return res.status(400).json({ error: "BAD_PROOF", message: "elapsed does not match server best" });
       }
     } else if (game === "word_game") {
+      const minLv = env.wordGameMinLevelForReward;
       const level = asInt(proof.level, 0);
-      if (level < 2) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "level must be >= 2" });
+      if (level < minLv) {
+        return res.status(400).json({
+          error: "BAD_PROOF",
+          message: `level must be >= ${minLv}`,
+        });
       }
       if (level !== asInt(stats.word_game_level, 1)) {
         return res.status(400).json({ error: "BAD_PROOF", message: "level does not match server" });
       }
     } else if (game === "timing_tap") {
+      const minSc = env.timingTapMinBestScoreForReward;
       const bestScore = asInt(proof.bestScore, -1);
-      if (bestScore < 1) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "bestScore invalid" });
+      if (bestScore < minSc) {
+        return res.status(400).json({
+          error: "BAD_PROOF",
+          message: `bestScore must be >= ${minSc}`,
+        });
       }
       if (bestScore !== asInt(stats.timing_tap_best_score, 0)) {
         return res.status(400).json({ error: "BAD_PROOF", message: "score does not match server" });
       }
     } else if (game === "cigarette_catch") {
+      const minSc = env.cigaretteCatchMinBestScoreForReward;
       const bestScore = asInt(proof.bestScore, -1);
-      if (bestScore < 1) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "bestScore invalid" });
+      if (bestScore < minSc) {
+        return res.status(400).json({
+          error: "BAD_PROOF",
+          message: `bestScore must be >= ${minSc}`,
+        });
       }
       if (bestScore !== asInt(stats.cigarette_catch_best_score, 0)) {
         return res.status(400).json({ error: "BAD_PROOF", message: "score does not match server" });
@@ -200,13 +219,14 @@ router.post("/reward/claim", async (req, res, next) => {
       .maybeSingle();
     if (coinRow.error) throw coinRow.error;
 
+    const rewardCoins = env.gameRewardCoinsPerClaim;
     const currentCoins = asInt(coinRow.data?.golden_coins, 0);
-    const nextCoins = currentCoins + DAILY_GAME_REWARD_COINS;
+    const nextCoins = currentCoins + rewardCoins;
 
     const ins = await supabaseAdmin.from("game_reward_claims").insert({
       user_id: userId,
       claim_key: claimKey,
-      coins_granted: DAILY_GAME_REWARD_COINS,
+      coins_granted: rewardCoins,
     });
     if (ins.error) {
       if (ins.error.code === "23505") {
@@ -243,7 +263,7 @@ router.post("/reward/claim", async (req, res, next) => {
     return res.status(200).json({
       ok: true,
       alreadyClaimed: false,
-      granted: DAILY_GAME_REWARD_COINS,
+      granted: rewardCoins,
       coins: nextCoins,
     });
   } catch (err) {
