@@ -133,14 +133,30 @@ router.put("/push", async (req, res, next) => {
 
     if (b.notification_settings) {
       const n = b.notification_settings;
+      /** JSON/클라이언트에서 false 가 명시될 때만 꺼짐 (undefined 는 기본 true) */
+      const triBool = (v, defaultTrue = true) => {
+        if (v === false || v === 0 || v === "false") return false;
+        if (v === true || v === 1 || v === "true") return true;
+        return defaultTrue;
+      };
+      const { data: existingNotif } = await supabaseAdmin
+        .from("notification_settings")
+        .select("fcm_token")
+        .eq("user_id", userId)
+        .maybeSingle();
       await supabaseAdmin.from("notification_settings").upsert(
         {
           user_id: userId,
           reminder_times_json: Array.isArray(n.reminder_times_json) ? n.reminder_times_json : [],
           reason_notification_enabled: Boolean(n.reason_notification_enabled),
-          inactivity_notification_enabled: n.inactivity_notification_enabled !== false,
-          attendance_reminder_enabled: n.attendance_reminder_enabled !== false,
+          inactivity_notification_enabled: triBool(n.inactivity_notification_enabled, true),
+          attendance_reminder_enabled: triBool(n.attendance_reminder_enabled, true),
+          cigarette_collection_reminder_enabled: triBool(
+            n.cigarette_collection_reminder_enabled,
+            true,
+          ),
           last_app_open_time_ms: n.last_app_open_time_ms == null ? null : asInt(n.last_app_open_time_ms, 0),
+          fcm_token: existingNotif?.fcm_token ?? null,
         },
         { onConflict: "user_id" },
       );

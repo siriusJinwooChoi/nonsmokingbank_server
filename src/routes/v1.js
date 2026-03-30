@@ -7,6 +7,7 @@ import reasonsRouter from "./reasons.js";
 import attendanceRouter from "./attendance.js";
 import coinsRouter from "./coins.js";
 import gamesRouter from "./games.js";
+import devicesRouter from "./devices.js";
 
 const router = Router();
 
@@ -21,6 +22,7 @@ router.use("/reasons", requireAuth, reasonsRouter);
 router.use("/attendance", requireAuth, attendanceRouter);
 router.use("/coins", requireAuth, coinsRouter);
 router.use("/games", requireAuth, gamesRouter);
+router.use("/devices", requireAuth, devicesRouter);
 
 export default router;
 

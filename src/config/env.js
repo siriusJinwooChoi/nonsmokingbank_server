@@ -45,6 +45,11 @@ export const env = {
    * 앱 원격 에셋(이미지·Lottie) 정적 폴더. 비우면 기본값은 저장소의 public/app-assets (index.js에서 경로 조합).
    */
   assetsRoot: readEnv("ASSETS_ROOT", ""),
+  /** Firebase Admin JSON 문자열 또는 서버 디스크 경로 (금연 리마인더 FCM) */
+  firebaseServiceAccountJson: readEnv("FIREBASE_SERVICE_ACCOUNT_JSON", ""),
+  /** true 이면 매 분 KST로 reminder_times_json 일치 시 FCM 전송 */
+  enableFcmReminderCron: readEnv("ENABLE_FCM_REMINDER_CRON", "false") === "true",
+  fcmReminderCronIntervalMs: readIntEnv("FCM_REMINDER_CRON_INTERVAL_MS", 15000, 5000, 120000),
 };
 
 export function validateEnv() {
