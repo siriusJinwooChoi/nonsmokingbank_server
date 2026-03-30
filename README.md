@@ -39,6 +39,11 @@ npm run dev
 | `TIMING_TAP_MIN_BEST_SCORE_FOR_REWARD` | `1` | 완벽 타이밍 보상 최소 최고 점수 |
 | `CIGARETTE_CATCH_MIN_BEST_SCORE_FOR_REWARD` | `1` | 담배맞추기 보상 최소 최고 점수 |
 | `ASSETS_ROOT` | (비움) | 원격 에셋 폴더 절대 경로. 비우면 저장소 `public/app-assets` |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | (비움) | Firebase **서비스 계정** JSON 전체를 **한 줄 문자열**로 넣거나, 서버 디스크의 **절대 경로** (Admin SDK로 FCM 발송) |
+| `ENABLE_FCM_REMINDER_CRON` | `false` | `true`일 때만 매 분 KST로 일일·수집·출석 FCM 전송 크론 동작 |
+| `FCM_REMINDER_CRON_INTERVAL_MS` | `15000` | 크론 폴링 간격(ms). 최소 `5000`, 최대 `120000` |
+
+**앱이 Android에서 FCM 토큰 등록에 성공하면 로컬 알람(일일·수집·출석)이 꺼지고, 이 크론이 실제로 알림을 보냅니다.** 배포 환경에서 `ENABLE_FCM_REMINDER_CRON=true` 와 유효한 `FIREBASE_SERVICE_ACCOUNT_JSON` 이 없으면 해당 알림은 **오지 않습니다.**
 
 ### `.env` 예시 (값만 바꿔서 사용)
 
@@ -56,6 +61,11 @@ JWT_AUDIENCE=authenticated
 # 선택 — 게임·에셋 튜닝
 # GAME_REWARD_COINS_PER_CLAIM=2
 # ASSETS_ROOT=
+
+# FCM 일일·수집·출석 알림 (앱이 토큰 등록 시 로컬 대신 서버 푸시 사용)
+# ENABLE_FCM_REMINDER_CRON=true
+# FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+# FCM_REMINDER_CRON_INTERVAL_MS=15000
 ```
 
 ## API 개요
@@ -79,6 +89,8 @@ JWT_AUDIENCE=authenticated
 - Health Check Path: `/health`
 
 Render 대시보드에 위 **필수** 환경 변수를 넣고, 게임 보상 금액을 바꿀 때는 `GAME_REWARD_COINS_PER_CLAIM` 을 설정합니다.
+
+**FCM 알림을 쓰려면** 같은 환경에 `ENABLE_FCM_REMINDER_CRON=true` 와 `FIREBASE_SERVICE_ACCOUNT_JSON` 을 추가한 뒤 **재배포**하세요. 배포 로그에 `[fcmDailyReminderCron] started every ...ms` 가 보이면 크론이 떠 있는 것입니다. (Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 JSON 생성)
 
 ## 원격 에셋(이미지·Lottie)
 

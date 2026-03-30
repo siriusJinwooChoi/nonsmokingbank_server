@@ -7,6 +7,10 @@ import { env } from "../config/env.js";
 /** 09/12/18/22 정각 담배 수집 알림 (로컬과 동일) */
 const COLLECTION_HOURS = [9, 12, 18, 22];
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const INACTIVITY_THRESHOLD_MS = 3 * MS_PER_DAY;
+const INACTIVITY_REPEAT_MS = MS_PER_DAY;
+
 /** reminder_times_json 항목이 현재 KST 시·분과 일치하는지 */
 function matchesReminderNow(reminderTimesJson, hour, minute) {
   if (!Array.isArray(reminderTimesJson)) return false;
@@ -33,6 +37,11 @@ function attendanceDatePrefix(v) {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
+function reasonBody(text) {
+  const t = text != null && String(text).trim() !== "" ? String(text).trim() : null;
+  return t ?? "오늘도 금연을 이어가세요!";
+}
+
 let _lastTickKey = "";
 
 async function sendFcm(messaging, token, title, body, channelId) {
@@ -49,10 +58,6 @@ async function sendFcm(messaging, token, title, body, channelId) {
   });
 }
 
-/**
- * 매 분 KST 기준으로 일일 리마인더·담배수집 정각·출석(18시 이후 10분 간격) FCM 전송.
- * 동일 분 중복 tick 방지를 위해 분 단위 키를 사용합니다.
- */
 export async function tickFcmDailyReminders() {
   if (!env.enableFcmReminderCron) return;
   const app = getFirebaseAdminApp();
@@ -64,11 +69,14 @@ export async function tickFcmDailyReminders() {
   _lastTickKey = tickKey;
 
   const todayYmd = ymdInSeoulNow();
+  const nowMs = Date.now();
 
   const { data: rows, error } = await supabaseAdmin
     .from("notification_settings")
     .select(
-      "user_id, reminder_times_json, fcm_token, attendance_reminder_enabled, cigarette_collection_reminder_enabled",
+      "user_id, reminder_times_json, fcm_token, attendance_reminder_enabled, cigarette_collection_reminder_enabled, " +
+        "reason_notification_enabled, inactivity_notification_enabled, last_app_open_time_ms, " +
+        "fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd",
     )
     .not("fcm_token", "is", null);
 
@@ -92,6 +100,20 @@ export async function tickFcmDailyReminders() {
     }
   }
 
+  let reasonMap = new Map();
+  if (userIds.length > 0) {
+    const { data: reasonRows, error: reasonErr } = await supabaseAdmin
+      .from("reasons")
+      .select("user_id, selected_reason_text")
+      .in("user_id", userIds);
+
+    if (reasonErr) {
+      console.error("[fcmDailyReminderCron] reasons select error:", reasonErr.message);
+    } else {
+      reasonMap = new Map((reasonRows ?? []).map((r) => [r.user_id, r.selected_reason_text]));
+    }
+  }
+
   const messaging = app.messaging();
 
   for (const row of rows ?? []) {
@@ -100,12 +122,14 @@ export async function tickFcmDailyReminders() {
 
     const attendanceOn = notifEnabled(row.attendance_reminder_enabled);
     const collectionOn = notifEnabled(row.cigarette_collection_reminder_enabled);
+    const inactivityOn = notifEnabled(row.inactivity_notification_enabled);
+    const reasonNotifOn = row.reason_notification_enabled === true;
 
     const lastDate = coinMap.get(row.user_id);
     const attendedToday = attendanceDatePrefix(lastDate) === todayYmd;
 
-    try {
-      if (matchesReminderNow(row.reminder_times_json, hour, minute)) {
+    if (matchesReminderNow(row.reminder_times_json, hour, minute)) {
+      try {
         await sendFcm(
           messaging,
           token,
@@ -113,9 +137,13 @@ export async function tickFcmDailyReminders() {
           "오늘도 한 걸음! 금연을 이어가볼까요?",
           "daily_reminder_channel",
         );
+      } catch (e) {
+        console.error("[fcmDailyReminderCron] daily send failed user", row.user_id, e?.message ?? e);
       }
+    }
 
-      if (collectionOn && minute === 0 && COLLECTION_HOURS.includes(hour)) {
+    if (collectionOn && minute === 0 && COLLECTION_HOURS.includes(hour)) {
+      try {
         await sendFcm(
           messaging,
           token,
@@ -123,9 +151,13 @@ export async function tickFcmDailyReminders() {
           "지금부터 20분간 도감 수집을 시도할 수 있어요.",
           "cigarette_collection_reminder_channel",
         );
+      } catch (e) {
+        console.error("[fcmDailyReminderCron] collection send failed user", row.user_id, e?.message ?? e);
       }
+    }
 
-      if (attendanceOn && hour >= 18 && minute % 10 === 0 && !attendedToday) {
+    if (attendanceOn && hour >= 18 && minute % 10 === 0 && !attendedToday) {
+      try {
         await sendFcm(
           messaging,
           token,
@@ -133,9 +165,64 @@ export async function tickFcmDailyReminders() {
           "금연코인 획득을 위해 금연뱅크에 출석하셔야 합니다.",
           "attendance_reminder_channel",
         );
+      } catch (e) {
+        console.error("[fcmDailyReminderCron] attendance send failed user", row.user_id, e?.message ?? e);
       }
-    } catch (e) {
-      console.error("[fcmDailyReminderCron] send failed user", row.user_id, e?.message ?? e);
+    }
+
+    if (reasonNotifOn && hour === 12 && minute === 1 && row.fcm_last_reason_sent_ymd !== todayYmd) {
+      try {
+        const body = reasonBody(reasonMap.get(row.user_id));
+        await sendFcm(messaging, token, "🌿 금연할 이유", body, "reason_reminder_channel");
+        const { error: upErr } = await supabaseAdmin
+          .from("notification_settings")
+          .update({ fcm_last_reason_sent_ymd: todayYmd })
+          .eq("user_id", row.user_id);
+        if (upErr) {
+          console.error("[fcmDailyReminderCron] reason dedup update failed", row.user_id, upErr.message);
+        }
+      } catch (e) {
+        console.error("[fcmDailyReminderCron] reason send failed user", row.user_id, e?.message ?? e);
+      }
+    }
+
+    if (inactivityOn) {
+      const lastOpen = row.last_app_open_time_ms;
+      if (lastOpen != null && lastOpen > 0) {
+        const inactiveMs = nowMs - Number(lastOpen);
+        if (inactiveMs >= INACTIVITY_THRESHOLD_MS) {
+          const lastSent = row.fcm_last_inactivity_sent_ms;
+          const canSend =
+            lastSent == null ||
+            Number.isNaN(Number(lastSent)) ||
+            nowMs - Number(lastSent) >= INACTIVITY_REPEAT_MS;
+
+          if (canSend) {
+            try {
+              await sendFcm(
+                messaging,
+                token,
+                "금연은 잘 하고 계신가요?",
+                "앱에서 금연현황을 확인해보세요!",
+                "inactivity_channel",
+              );
+              const { error: upErr } = await supabaseAdmin
+                .from("notification_settings")
+                .update({ fcm_last_inactivity_sent_ms: nowMs })
+                .eq("user_id", row.user_id);
+              if (upErr) {
+                console.error(
+                  "[fcmDailyReminderCron] inactivity dedup update failed",
+                  row.user_id,
+                  upErr.message,
+                );
+              }
+            } catch (e) {
+              console.error("[fcmDailyReminderCron] inactivity send failed user", row.user_id, e?.message ?? e);
+            }
+          }
+        }
+      }
     }
   }
 }

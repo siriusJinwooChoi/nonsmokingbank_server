@@ -141,7 +141,9 @@ router.put("/push", async (req, res, next) => {
       };
       const { data: existingNotif } = await supabaseAdmin
         .from("notification_settings")
-        .select("fcm_token")
+        .select(
+          "fcm_token, fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd",
+        )
         .eq("user_id", userId)
         .maybeSingle();
       await supabaseAdmin.from("notification_settings").upsert(
@@ -157,6 +159,8 @@ router.put("/push", async (req, res, next) => {
           ),
           last_app_open_time_ms: n.last_app_open_time_ms == null ? null : asInt(n.last_app_open_time_ms, 0),
           fcm_token: existingNotif?.fcm_token ?? null,
+          fcm_last_inactivity_sent_ms: existingNotif?.fcm_last_inactivity_sent_ms ?? null,
+          fcm_last_reason_sent_ymd: existingNotif?.fcm_last_reason_sent_ymd ?? null,
         },
         { onConflict: "user_id" },
       );
