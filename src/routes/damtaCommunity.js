@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { sanitizePublicText } from "../lib/profanityFilter.js";
+import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
 
-/** @type {{ id: string, text: string, color: string, ts: number }[]} */
+/** @type {{ id: string, text: string, color: string, ts: number, authorName: string }[]} */
 const messages = [];
 const MAX_MESSAGES = 100;
 const TTL_MS = 5 * 60 * 1000;
@@ -37,7 +38,8 @@ router.get("/messages", (req, res) => {
   res.status(200).json({ ok: true, items });
 });
 
-router.post("/messages", (req, res) => {
+router.post("/messages", async (req, res, next) => {
+  try {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   if (!allowRate(ip)) {
     return res.status(429).json({
@@ -62,15 +64,33 @@ router.post("/messages", (req, res) => {
     color = "#22d3ee";
   }
 
+  let authorName = "익명";
+  const userId = req.user?.id;
+  if (userId) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    const n = data?.display_name;
+    if (typeof n === "string" && n.trim() !== "") {
+      authorName = n.trim();
+    }
+  }
+
   pruneExpired();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const item = { id, text, color, ts: Date.now() };
+  const item = { id, text, color, ts: Date.now(), authorName };
   messages.push(item);
   while (messages.length > MAX_MESSAGES) {
     messages.shift();
   }
 
   res.status(201).json({ ok: true, item });
+  } catch (err) {
+    return next(err);
+  }
 });
 
 export default router;

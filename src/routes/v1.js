@@ -24,8 +24,8 @@ router.use("/attendance", requireAuth, attendanceRouter);
 router.use("/coins", requireAuth, coinsRouter);
 router.use("/games", requireAuth, gamesRouter);
 router.use("/devices", requireAuth, devicesRouter);
-/** 담타 실시간 한마디: 인증 없이 짧은 메시지 공유(메모리, TTL) */
-router.use("/community/damta", damtaCommunityRouter);
+/** 담타 실시간 한마디: 로그인 사용자 닉네임 포함 */
+router.use("/community/damta", requireAuth, damtaCommunityRouter);
 
 export default router;
 
