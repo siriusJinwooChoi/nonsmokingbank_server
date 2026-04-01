@@ -78,6 +78,12 @@ router.post("/messages", async (req, res, next) => {
       authorName = n.trim();
     }
   }
+  if (authorName === "익명") {
+    const hinted = typeof req.body?.authorName === "string" ? req.body.authorName.trim() : "";
+    if (hinted) {
+      authorName = sanitizePublicText(hinted).slice(0, 12).trim() || "익명";
+    }
+  }
 
   pruneExpired();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
