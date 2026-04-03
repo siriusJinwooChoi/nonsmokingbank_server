@@ -33,5 +33,36 @@ export function gameStatsFieldsChanged(prev, incoming) {
   if (asInt(prev.timing_tap_best_score, 0) !== asInt(incoming.timing_tap_best_score, 0)) return true;
   if (asInt(prev.cigarette_catch_best_stage, 0) !== asInt(incoming.cigarette_catch_best_stage, 0)) return true;
   if (asInt(prev.cigarette_catch_best_score, 0) !== asInt(incoming.cigarette_catch_best_score, 0)) return true;
+
+  const pLastClear = prev.number_sequence_last_clear_seconds;
+  const iLastClear = incoming.number_sequence_last_clear_seconds;
+  if (pLastClear == null && iLastClear == null) {
+    // both null
+  } else if (pLastClear == null || iLastClear == null) {
+    return true;
+  } else if (!seqSecondsEqual(pLastClear, iLastClear)) {
+    return true;
+  }
+
+  const pTapSess = prev.timing_tap_last_session_score;
+  const iTapSess = incoming.timing_tap_last_session_score;
+  if (pTapSess == null && iTapSess == null) {
+    // both null
+  } else if (pTapSess == null || iTapSess == null) {
+    return true;
+  } else if (asInt(pTapSess, 0) !== asInt(iTapSess, 0)) {
+    return true;
+  }
+
+  const pCatchSess = prev.cigarette_catch_last_session_score;
+  const iCatchSess = incoming.cigarette_catch_last_session_score;
+  if (pCatchSess == null && iCatchSess == null) {
+    // both null
+  } else if (pCatchSess == null || iCatchSess == null) {
+    return true;
+  } else if (asInt(pCatchSess, 0) !== asInt(iCatchSess, 0)) {
+    return true;
+  }
+
   return false;
 }

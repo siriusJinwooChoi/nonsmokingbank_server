@@ -41,6 +41,19 @@ export const env = {
     1,
     10_000_000,
   ),
+  /** 세션 종료 기반 일일 보상: 최소 점수(0이면 0점 종료도 허용) */
+  timingTapMinSessionScoreForReward: readIntEnv(
+    "TIMING_TAP_MIN_SESSION_SCORE_FOR_REWARD",
+    0,
+    0,
+    10_000_000,
+  ),
+  cigaretteCatchMinSessionScoreForReward: readIntEnv(
+    "CIGARETTE_CATCH_MIN_SESSION_SCORE_FOR_REWARD",
+    0,
+    0,
+    10_000_000,
+  ),
   /**
    * 앱 원격 에셋(이미지·Lottie) 정적 폴더. 비우면 기본값은 저장소의 public/app-assets (index.js에서 경로 조합).
    */

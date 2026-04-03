@@ -219,16 +219,35 @@ router.put("/push", async (req, res, next) => {
 
     if (b.game_stats) {
       const g = b.game_stats;
-      const incoming = {
-        number_sequence_best_seconds: asDoubleOrNull(g.number_sequence_best_seconds),
-        word_game_level: asInt(g.word_game_level, 1),
-        timing_tap_best_score: asInt(g.timing_tap_best_score, 0),
-        cigarette_catch_best_stage: asInt(g.cigarette_catch_best_stage, 0),
-        cigarette_catch_best_score: asInt(g.cigarette_catch_best_score, 0),
-      };
       const prevRes = await supabaseAdmin.from("game_stats").select("*").eq("user_id", userId).maybeSingle();
       if (prevRes.error) throw prevRes.error;
       const prev = prevRes.data;
+      const numberSequenceLastClearSeconds =
+        g.number_sequence_last_clear_seconds === undefined
+          ? prev?.number_sequence_last_clear_seconds ?? null
+          : asDoubleOrNull(g.number_sequence_last_clear_seconds);
+      const timingTapLastSessionScore =
+        g.timing_tap_last_session_score === undefined
+          ? prev?.timing_tap_last_session_score ?? null
+          : g.timing_tap_last_session_score === null
+            ? null
+            : asInt(g.timing_tap_last_session_score, 0);
+      const cigaretteCatchLastSessionScore =
+        g.cigarette_catch_last_session_score === undefined
+          ? prev?.cigarette_catch_last_session_score ?? null
+          : g.cigarette_catch_last_session_score === null
+            ? null
+            : asInt(g.cigarette_catch_last_session_score, 0);
+      const incoming = {
+        number_sequence_best_seconds: asDoubleOrNull(g.number_sequence_best_seconds),
+        number_sequence_last_clear_seconds: numberSequenceLastClearSeconds,
+        word_game_level: asInt(g.word_game_level, 1),
+        timing_tap_best_score: asInt(g.timing_tap_best_score, 0),
+        timing_tap_last_session_score: timingTapLastSessionScore,
+        cigarette_catch_best_stage: asInt(g.cigarette_catch_best_stage, 0),
+        cigarette_catch_best_score: asInt(g.cigarette_catch_best_score, 0),
+        cigarette_catch_last_session_score: cigaretteCatchLastSessionScore,
+      };
       const changed = gameStatsFieldsChanged(prev, incoming);
       const payload = {
         user_id: userId,

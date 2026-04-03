@@ -30,17 +30,37 @@ router.put("/stats", async (req, res, next) => {
     const cigaretteCatchBestStage = asInt(body.cigaretteCatchBestStage, 0);
     const cigaretteCatchBestScore = asInt(body.cigaretteCatchBestScore, 0);
 
-    const incoming = {
-      number_sequence_best_seconds: numberSequenceBestSeconds,
-      word_game_level: wordGameLevel,
-      timing_tap_best_score: timingTapBestScore,
-      cigarette_catch_best_stage: cigaretteCatchBestStage,
-      cigarette_catch_best_score: cigaretteCatchBestScore,
-    };
-
     const prevRes = await supabaseAdmin.from("game_stats").select("*").eq("user_id", userId).maybeSingle();
     if (prevRes.error) throw prevRes.error;
     const prev = prevRes.data;
+
+    const numberSequenceLastClearSeconds =
+      body.numberSequenceLastClearSeconds === undefined
+        ? prev?.number_sequence_last_clear_seconds ?? null
+        : asDoubleOrNull(body.numberSequenceLastClearSeconds);
+    const timingTapLastSessionScore =
+      body.timingTapLastSessionScore === undefined
+        ? prev?.timing_tap_last_session_score ?? null
+        : body.timingTapLastSessionScore === null
+          ? null
+          : asInt(body.timingTapLastSessionScore, 0);
+    const cigaretteCatchLastSessionScore =
+      body.cigaretteCatchLastSessionScore === undefined
+        ? prev?.cigarette_catch_last_session_score ?? null
+        : body.cigaretteCatchLastSessionScore === null
+          ? null
+          : asInt(body.cigaretteCatchLastSessionScore, 0);
+
+    const incoming = {
+      number_sequence_best_seconds: numberSequenceBestSeconds,
+      number_sequence_last_clear_seconds: numberSequenceLastClearSeconds,
+      word_game_level: wordGameLevel,
+      timing_tap_best_score: timingTapBestScore,
+      timing_tap_last_session_score: timingTapLastSessionScore,
+      cigarette_catch_best_stage: cigaretteCatchBestStage,
+      cigarette_catch_best_score: cigaretteCatchBestScore,
+      cigarette_catch_last_session_score: cigaretteCatchLastSessionScore,
+    };
 
     const changed = gameStatsFieldsChanged(prev, incoming);
     const payload = {
@@ -71,6 +91,8 @@ router.get("/reward/settings", (_req, res) => {
     wordGameMinLevelForReward: env.wordGameMinLevelForReward,
     timingTapMinBestScoreForReward: env.timingTapMinBestScoreForReward,
     cigaretteCatchMinBestScoreForReward: env.cigaretteCatchMinBestScoreForReward,
+    timingTapMinSessionScoreForReward: env.timingTapMinSessionScoreForReward,
+    cigaretteCatchMinSessionScoreForReward: env.cigaretteCatchMinSessionScoreForReward,
   });
 });
 
@@ -135,8 +157,17 @@ router.post("/reward/claim", async (req, res, next) => {
       if (elapsed == null) {
         return res.status(400).json({ error: "BAD_PROOF", message: "elapsedSeconds required" });
       }
-      if (!seqSecondsEqual(elapsed, stats.number_sequence_best_seconds)) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "elapsed does not match server best" });
+      const matchBest =
+        stats.number_sequence_best_seconds != null &&
+        seqSecondsEqual(elapsed, stats.number_sequence_best_seconds);
+      const matchLast =
+        stats.number_sequence_last_clear_seconds != null &&
+        seqSecondsEqual(elapsed, stats.number_sequence_last_clear_seconds);
+      if (!matchBest && !matchLast) {
+        return res.status(400).json({
+          error: "BAD_PROOF",
+          message: "elapsed does not match server best or last clear",
+        });
       }
     } else if (game === "word_game") {
       const minLv = env.wordGameMinLevelForReward;
@@ -151,28 +182,36 @@ router.post("/reward/claim", async (req, res, next) => {
         return res.status(400).json({ error: "BAD_PROOF", message: "level does not match server" });
       }
     } else if (game === "timing_tap") {
-      const minSc = env.timingTapMinBestScoreForReward;
-      const bestScore = asInt(proof.bestScore, -1);
-      if (bestScore < minSc) {
+      const minSess = env.timingTapMinSessionScoreForReward;
+      if (proof.sessionScore === undefined || proof.sessionScore === null) {
+        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore required" });
+      }
+      const sessionScore = asInt(proof.sessionScore, -1);
+      if (sessionScore < minSess) {
         return res.status(400).json({
           error: "BAD_PROOF",
-          message: `bestScore must be >= ${minSc}`,
+          message: `sessionScore must be >= ${minSess}`,
         });
       }
-      if (bestScore !== asInt(stats.timing_tap_best_score, 0)) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "score does not match server" });
+      const srv = stats.timing_tap_last_session_score;
+      if (srv == null || sessionScore !== asInt(srv, -2)) {
+        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore does not match server" });
       }
     } else if (game === "cigarette_catch") {
-      const minSc = env.cigaretteCatchMinBestScoreForReward;
-      const bestScore = asInt(proof.bestScore, -1);
-      if (bestScore < minSc) {
+      const minSess = env.cigaretteCatchMinSessionScoreForReward;
+      if (proof.sessionScore === undefined || proof.sessionScore === null) {
+        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore required" });
+      }
+      const sessionScore = asInt(proof.sessionScore, -1);
+      if (sessionScore < minSess) {
         return res.status(400).json({
           error: "BAD_PROOF",
-          message: `bestScore must be >= ${minSc}`,
+          message: `sessionScore must be >= ${minSess}`,
         });
       }
-      if (bestScore !== asInt(stats.cigarette_catch_best_score, 0)) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "score does not match server" });
+      const srv = stats.cigarette_catch_last_session_score;
+      if (srv == null || sessionScore !== asInt(srv, -2)) {
+        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore does not match server" });
       }
     }
 
