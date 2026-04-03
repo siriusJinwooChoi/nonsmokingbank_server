@@ -15,6 +15,11 @@ const RATE_MAX = 20;
 /** @type {Map<string, number[]>} */
 const rateByIp = new Map();
 
+/** 담타 화면 동시 접속(하트비트). 단일 Node 프로세스 기준. */
+const PRESENCE_TTL_MS = 45 * 1000;
+/** @type {Map<string, number>} */
+const presenceByUser = new Map();
+
 function pruneExpired() {
   const now = Date.now();
   while (messages.length > 0 && now - messages[0].ts > TTL_MS) {
@@ -32,10 +37,32 @@ function allowRate(ip) {
   return true;
 }
 
+function prunePresence() {
+  const now = Date.now();
+  for (const [uid, t] of presenceByUser) {
+    if (now - t > PRESENCE_TTL_MS) presenceByUser.delete(uid);
+  }
+}
+
 router.get("/messages", (req, res) => {
   pruneExpired();
   const items = messages.slice(-50);
   res.status(200).json({ ok: true, items });
+});
+
+/**
+ * POST /v1/community/damta/presence
+ * 담타 화면에 머무는 동안 주기적으로 호출 → 동시 접속자 수 집계.
+ */
+router.post("/presence", (req, res) => {
+  const uid = req.user?.id;
+  if (!uid) {
+    return res.status(401).json({ error: "UNAUTH", message: "login required" });
+  }
+  prunePresence();
+  presenceByUser.set(String(uid), Date.now());
+  prunePresence();
+  return res.status(200).json({ ok: true, count: presenceByUser.size });
 });
 
 router.post("/messages", async (req, res, next) => {
