@@ -156,7 +156,8 @@ export async function tickFcmDailyReminders() {
       }
     }
 
-    if (attendanceOn && hour >= 18 && minute % 10 === 0 && !attendedToday) {
+    // 18시 이후 미출석: 정각마다 1시간 간격 (KST 분==0)
+    if (attendanceOn && hour >= 18 && minute === 0 && !attendedToday) {
       try {
         await sendFcm(
           messaging,
