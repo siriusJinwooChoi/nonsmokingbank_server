@@ -37,6 +37,7 @@ router.get("/pull", async (req, res, next) => {
       notification_settings,
       coins_and_attendance,
       tree_progress,
+      dream_car_progress,
       cigarette_collection,
       game_stats,
     ] = await Promise.all([
@@ -46,6 +47,7 @@ router.get("/pull", async (req, res, next) => {
       supabaseAdmin.from("notification_settings").select("*").eq("user_id", userId).maybeSingle(),
       supabaseAdmin.from("coins_and_attendance").select("*").eq("user_id", userId).maybeSingle(),
       supabaseAdmin.from("tree_progress").select("*").eq("user_id", userId).maybeSingle(),
+      supabaseAdmin.from("dream_car_progress").select("*").eq("user_id", userId).maybeSingle(),
       supabaseAdmin.from("cigarette_collection").select("*").eq("user_id", userId).maybeSingle(),
       supabaseAdmin.from("game_stats").select("*").eq("user_id", userId).maybeSingle(),
     ]);
@@ -57,6 +59,7 @@ router.get("/pull", async (req, res, next) => {
       notification_settings.error,
       coins_and_attendance.error,
       tree_progress.error,
+      dream_car_progress.error,
       cigarette_collection.error,
       game_stats.error,
     ].filter(Boolean);
@@ -70,6 +73,7 @@ router.get("/pull", async (req, res, next) => {
       notification_settings: notification_settings.data,
       coins_and_attendance: coins_and_attendance.data,
       tree_progress: tree_progress.data,
+      dream_car_progress: dream_car_progress.data,
       cigarette_collection: cigarette_collection.data,
       game_stats: game_stats.data,
     });
@@ -194,6 +198,25 @@ router.put("/push", async (req, res, next) => {
           current_water: asInt(t.current_water, 0),
           last_water_update_ms: lastMs,
           saved_trees_count: asInt(t.saved_trees_count, 0),
+        },
+        { onConflict: "user_id" },
+      );
+    }
+
+    if (b.dream_car_progress) {
+      const d = b.dream_car_progress;
+      const rawBrand = d.dream_car_brand;
+      let brand = null;
+      if (rawBrand === "hyundai" || rawBrand === "kia") {
+        brand = rawBrand;
+      }
+      const stage = Math.min(10, Math.max(1, asInt(d.dream_car_stage, 1)));
+      await supabaseAdmin.from("dream_car_progress").upsert(
+        {
+          user_id: userId,
+          dream_car_brand: brand,
+          dream_car_stage: stage,
+          updated_at: new Date().toISOString(),
         },
         { onConflict: "user_id" },
       );

@@ -68,6 +68,15 @@ JWT_AUDIENCE=authenticated
 # FCM_REMINDER_CRON_INTERVAL_MS=15000
 ```
 
+## Supabase 스키마 (동기화)
+
+앱의 `GET|PUT /v1/sync/pull|push` 가 사용하는 테이블은 Supabase에 있어야 합니다.  
+**나의 드림카** 연동을 위해 아래 마이그레이션을 SQL 에디터에서 한 번 실행하세요.
+
+- `supabase/migrations/20260205120000_dream_car_progress.sql` — `dream_car_progress` 테이블 (`dream_car_brand`, `dream_car_stage`)
+
+기존 프로젝트에 테이블이 없으면 `pull` 시 오류가 날 수 있습니다.
+
 ## API 개요
 
 - `GET /v1/health`
