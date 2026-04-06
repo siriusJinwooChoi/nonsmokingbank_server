@@ -205,10 +205,14 @@ router.put("/push", async (req, res, next) => {
 
     if (b.dream_car_progress) {
       const d = b.dream_car_progress;
-      const rawBrand = d.dream_car_brand;
+      const rawBrand = String(d.dream_car_brand ?? "").trim().toLowerCase();
       let brand = null;
-      if (rawBrand === "hyundai" || rawBrand === "kia") {
-        brand = rawBrand;
+      // 새 자산 폴더명(hcompany/kcompany) 기준으로 저장하고,
+      // 이전 클라이언트가 보내는 legacy 값(hyundai/kia)도 호환 처리합니다.
+      if (rawBrand === "hcompany" || rawBrand === "hyundai") {
+        brand = "hcompany";
+      } else if (rawBrand === "kcompany" || rawBrand === "kia") {
+        brand = "kcompany";
       }
       const stage = Math.min(10, Math.max(1, asInt(d.dream_car_stage, 1)));
       await supabaseAdmin.from("dream_car_progress").upsert(
