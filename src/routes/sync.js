@@ -182,6 +182,7 @@ router.put("/push", async (req, res, next) => {
           golden_coins: asInt(c.golden_coins, 0),
           attendance_streak_day: asInt(c.attendance_streak_day, 1),
           attendance_last_date: dateForDb,
+          savings_exchanged_to_coins_won: asInt(c.savings_exchanged_to_coins_won, 0),
         },
         { onConflict: "user_id" },
       );
