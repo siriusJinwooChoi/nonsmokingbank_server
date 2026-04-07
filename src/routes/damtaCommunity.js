@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { sanitizePublicText } from "../lib/profanityFilter.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { seoulMondayStartMs } from "../lib/seoulWeek.js";
 
 const router = Router();
 
 /** @type {{ id: string, text: string, color: string, ts: number, authorName: string }[]} */
 const messages = [];
-const MAX_MESSAGES = 100;
-const TTL_MS = 5 * 60 * 1000;
+const MAX_MESSAGES = 300;
 const MAX_TEXT_LEN = 40;
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_MAX = 20;
@@ -20,10 +20,13 @@ const PRESENCE_TTL_MS = 45 * 1000;
 /** @type {Map<string, number>} */
 const presenceByUser = new Map();
 
+/** 현재 서울 기준 주(월~일)에 속한 메시지만 유지. 일요일 밤 이후(월요일 00:00) 이전 주는 일괄 제거. */
 function pruneExpired() {
-  const now = Date.now();
-  while (messages.length > 0 && now - messages[0].ts > TTL_MS) {
-    messages.shift();
+  const weekStart = seoulMondayStartMs();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (seoulMondayStartMs(messages[i].ts) !== weekStart) {
+      messages.splice(i, 1);
+    }
   }
 }
 
