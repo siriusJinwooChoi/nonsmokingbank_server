@@ -46,4 +46,15 @@ router.patch("/", async (req, res, next) => {
   }
 });
 
+router.delete("/account", async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 export default router;
