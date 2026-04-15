@@ -49,6 +49,23 @@ router.patch("/", async (req, res, next) => {
 router.delete("/account", async (req, res, next) => {
   try {
     const userId = req.user.id;
+    // 사용자별 동기화/프로필 데이터를 먼저 정리한 뒤 Auth 유저를 삭제합니다.
+    const cleanupTasks = [
+      supabaseAdmin.from("user_settings").delete().eq("user_id", userId),
+      supabaseAdmin.from("quit_progress").delete().eq("user_id", userId),
+      supabaseAdmin.from("reasons").delete().eq("user_id", userId),
+      supabaseAdmin.from("notification_settings").delete().eq("user_id", userId),
+      supabaseAdmin.from("coins_and_attendance").delete().eq("user_id", userId),
+      supabaseAdmin.from("tree_progress").delete().eq("user_id", userId),
+      supabaseAdmin.from("dream_car_progress").delete().eq("user_id", userId),
+      supabaseAdmin.from("cigarette_collection").delete().eq("user_id", userId),
+      supabaseAdmin.from("game_stats").delete().eq("user_id", userId),
+      supabaseAdmin.from("profiles").delete().eq("id", userId),
+    ];
+    const cleanupResults = await Promise.all(cleanupTasks);
+    const cleanupError = cleanupResults.find((r) => r.error)?.error;
+    if (cleanupError) throw cleanupError;
+
     const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
     if (error) throw error;
     return res.status(200).json({ ok: true });
