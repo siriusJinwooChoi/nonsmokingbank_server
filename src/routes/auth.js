@@ -101,6 +101,31 @@ router.post("/oauth/pkce", async (req, res) => {
 });
 
 /**
+ * iOS/macOS 네이티브 Sign in with Apple → identityToken 을 Supabase 세션으로 교환
+ * POST /v1/auth/oauth/apple-id-token  { id_token, nonce? }
+ */
+router.post("/oauth/apple-id-token", async (req, res) => {
+  try {
+    const id_token = typeof req.body?.id_token === "string" ? req.body.id_token : "";
+    const nonce = typeof req.body?.nonce === "string" ? req.body.nonce : "";
+    if (!id_token) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "id_token required" });
+    }
+    const body = { provider: "apple", id_token };
+    if (nonce) body.nonce = nonce;
+    const data = await supabaseAuthPost("/auth/v1/token?grant_type=id_token", body);
+    return res.status(200).json(authSuccessPayload(data));
+  } catch (err) {
+    const status = err.status >= 400 && err.status < 600 ? err.status : 401;
+    return res.status(status).json({
+      error: "APPLE_ID_TOKEN_FAILED",
+      message: err.message,
+      details: err.body ?? null,
+    });
+  }
+});
+
+/**
  * 브라우저에서 열 Supabase /authorize URL (앱은 Supabase URL/anon 없이 BFF만 호출)
  * GET /v1/auth/oauth/authorize-url?provider=google&redirect_to=...&code_challenge=...&code_challenge_method=S256&scopes=...
  */
