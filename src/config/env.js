@@ -63,6 +63,12 @@ export const env = {
   /** true 이면 매 분 KST로 reminder_times_json 일치 시 FCM 전송 */
   enableFcmReminderCron: readEnv("ENABLE_FCM_REMINDER_CRON", "false") === "true",
   fcmReminderCronIntervalMs: readIntEnv("FCM_REMINDER_CRON_INTERVAL_MS", 15000, 5000, 120000),
+  /**
+   * 네이티브 Sign in with Apple → GoTrue `grant_type=id_token` 시 `client_id`.
+   * identityToken JWT의 `aud`와 동일해야 함(일반적으로 Xcode 번들 ID).
+   * Render에서 `APPLE_NATIVE_CLIENT_ID` 로 덮어쓸 수 있음.
+   */
+  appleNativeClientId: readEnv("APPLE_NATIVE_CLIENT_ID", "com.cjw.nonsmoking"),
 };
 
 export function validateEnv() {

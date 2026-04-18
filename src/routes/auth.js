@@ -111,7 +111,12 @@ router.post("/oauth/apple-id-token", async (req, res) => {
     if (!id_token) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "id_token required" });
     }
-    const body = { provider: "apple", id_token };
+    // 네이티브 Apple JWT aud(번들 ID)와 맞춰야 검증이 통과하는 경우가 많음.
+    const body = {
+      provider: "apple",
+      id_token,
+      client_id: env.appleNativeClientId,
+    };
     if (nonce) body.nonce = nonce;
     const data = await supabaseAuthPost("/auth/v1/token?grant_type=id_token", body);
     return res.status(200).json(authSuccessPayload(data));
