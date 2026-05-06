@@ -4,9 +4,8 @@ import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
 
-const MILESTONE_DAYS = new Set([7, 14, 21, 28]);
 const COINS_PER_DAY = 15;
-const COINS_MILESTONE = 20;
+const COINS_WEEKEND = 20;
 
 function parseYmd(s) {
   if (typeof s !== "string") return null;
@@ -25,6 +24,14 @@ function daysBetweenYmd(a, b) {
   const da = Date.UTC(pa.y, pa.mo - 1, pa.d);
   const db = Date.UTC(pb.y, pb.mo - 1, pb.d);
   return Math.floor((db - da) / (24 * 60 * 60 * 1000));
+}
+
+function isWeekendYmd(s) {
+  const p = parseYmd(s);
+  if (!p) return false;
+  const utc = new Date(Date.UTC(p.y, p.mo - 1, p.d));
+  const weekday = utc.getUTCDay(); // 0: 일요일, 6: 토요일
+  return weekday === 0 || weekday === 6;
 }
 
 router.get("/state", async (req, res, next) => {
@@ -84,9 +91,8 @@ router.post("/check-in", async (req, res, next) => {
           lastDate,
         });
       }
-      if (diff != null && diff > 1) {
-        streakDay = 1;
-      }
+      // 미출석 날짜가 있어도 streakDay를 초기화하지 않고 그대로 유지한다.
+      // (요구사항: 미출석 날짜는 건너뛰고 다음 출석 진행)
     }
 
     if (day != streakDay) {
@@ -97,7 +103,7 @@ router.post("/check-in", async (req, res, next) => {
       });
     }
 
-    const awardedCoins = MILESTONE_DAYS.has(day) ? COINS_MILESTONE : COINS_PER_DAY;
+    const awardedCoins = isWeekendYmd(today) ? COINS_WEEKEND : COINS_PER_DAY;
     coins += awardedCoins;
     const nextStreakDay = day === 28 ? 1 : day + 1;
 
