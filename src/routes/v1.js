@@ -9,6 +9,7 @@ import coinsRouter from "./coins.js";
 import gamesRouter from "./games.js";
 import devicesRouter from "./devices.js";
 import damtaCommunityRouter from "./damtaCommunity.js";
+import smokingPatternsRouter from "./smokingPatterns.js";
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.use("/games", requireAuth, gamesRouter);
 router.use("/devices", requireAuth, devicesRouter);
 /** 담타 실시간 한마디: 로그인 사용자 닉네임 포함 */
 router.use("/community/damta", requireAuth, damtaCommunityRouter);
+router.use("/smoking-patterns", requireAuth, smokingPatternsRouter);
 
 export default router;
 

@@ -60,6 +60,7 @@ router.delete("/account", async (req, res, next) => {
       supabaseAdmin.from("dream_car_progress").delete().eq("user_id", userId),
       supabaseAdmin.from("cigarette_collection").delete().eq("user_id", userId),
       supabaseAdmin.from("game_stats").delete().eq("user_id", userId),
+      supabaseAdmin.from("smoking_pattern_logs").delete().eq("user_id", userId),
       supabaseAdmin.from("profiles").delete().eq("id", userId),
     ];
     const cleanupResults = await Promise.all(cleanupTasks);
