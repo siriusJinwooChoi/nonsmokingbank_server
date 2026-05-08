@@ -146,7 +146,7 @@ router.put("/push", async (req, res, next) => {
       const { data: existingNotif } = await supabaseAdmin
         .from("notification_settings")
         .select(
-          "fcm_token, fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, pattern_reminder_enabled",
+          "fcm_token, fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, pattern_reminder_enabled, pattern_reminder_slots_json",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -162,6 +162,9 @@ router.put("/push", async (req, res, next) => {
             true,
           ),
           pattern_reminder_enabled: triBool(n.pattern_reminder_enabled, true),
+          pattern_reminder_slots_json: Array.isArray(n.pattern_reminder_slots_json)
+            ? n.pattern_reminder_slots_json
+            : (existingNotif?.pattern_reminder_slots_json ?? []),
           last_app_open_time_ms: n.last_app_open_time_ms == null ? null : asInt(n.last_app_open_time_ms, 0),
           fcm_token: existingNotif?.fcm_token ?? null,
           fcm_last_inactivity_sent_ms: existingNotif?.fcm_last_inactivity_sent_ms ?? null,
