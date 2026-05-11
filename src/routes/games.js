@@ -24,7 +24,11 @@ router.put("/stats", async (req, res, next) => {
     const userId = req.user.id;
     const body = req.body ?? {};
 
-    const numberSequenceBestSeconds = asDoubleOrNull(body.numberSequenceBestSeconds);
+    let numberSequenceBestSeconds = asDoubleOrNull(body.numberSequenceBestSeconds);
+    // 0초는 null과 달리 DB에 남아 랭킹 상단을 오염시킬 수 있어 저장하지 않음
+    if (numberSequenceBestSeconds != null && numberSequenceBestSeconds <= 0) {
+      numberSequenceBestSeconds = null;
+    }
     const wordGameLevel = asInt(body.wordGameLevel, 1);
     const timingTapBestScore = asInt(body.timingTapBestScore, 0);
     const cigaretteCatchBestStage = asInt(body.cigaretteCatchBestStage, 0);
@@ -274,35 +278,50 @@ router.post("/reward/claim", async (req, res, next) => {
   }
 });
 
+/** 1~30 랭킹: 실제 클리어로 볼 수 있는 행만 (Supabase 일일 스냅샷·마이그레이션과 동일 기준) */
+function numberSequenceRankingFilters(q) {
+  return q
+    .gt("number_sequence_best_seconds", 0)
+    .or("number_sequence_last_clear_seconds.is.null,number_sequence_last_clear_seconds.gt.0");
+}
+
 router.get("/rankings", async (req, res, next) => {
   try {
     const userId = req.user.id;
     const limit = Math.min(Math.max(asInt(req.query?.limit, 10), 1), 50);
 
-    const seqRes = await supabaseAdmin
-      .from("game_stats")
-      .select("user_id, number_sequence_best_seconds")
-      .not("number_sequence_best_seconds", "is", null)
+    const seqRes = await numberSequenceRankingFilters(
+      supabaseAdmin
+        .from("game_stats")
+        .select("user_id, number_sequence_best_seconds, number_sequence_last_clear_seconds"),
+    )
       .order("number_sequence_best_seconds", { ascending: true })
       .limit(limit);
+    if (seqRes.error) throw seqRes.error;
 
     const wordRes = await supabaseAdmin
       .from("game_stats")
       .select("user_id, word_game_level")
+      .gt("word_game_level", 1)
       .order("word_game_level", { ascending: false })
       .limit(limit);
+    if (wordRes.error) throw wordRes.error;
 
     const catchRes = await supabaseAdmin
       .from("game_stats")
       .select("user_id, cigarette_catch_best_score")
+      .gt("cigarette_catch_best_score", 0)
       .order("cigarette_catch_best_score", { ascending: false })
       .limit(limit);
+    if (catchRes.error) throw catchRes.error;
 
     const timingRes = await supabaseAdmin
       .from("game_stats")
       .select("user_id, timing_tap_best_score")
+      .gt("timing_tap_best_score", 0)
       .order("timing_tap_best_score", { ascending: false })
       .limit(limit);
+    if (timingRes.error) throw timingRes.error;
 
     const ids = new Set();
     for (const row of [...(seqRes.data ?? []), ...(wordRes.data ?? []), ...(catchRes.data ?? []), ...(timingRes.data ?? [])]) {
@@ -321,35 +340,68 @@ router.get("/rankings", async (req, res, next) => {
 
     const myStatsRes = await supabaseAdmin
       .from("game_stats")
-      .select("number_sequence_best_seconds, word_game_level, cigarette_catch_best_score, timing_tap_best_score")
+      .select(
+        "number_sequence_best_seconds, number_sequence_last_clear_seconds, word_game_level, cigarette_catch_best_score, timing_tap_best_score",
+      )
       .eq("user_id", userId)
       .maybeSingle();
     if (myStatsRes.error) throw myStatsRes.error;
     const myStats = myStatsRes.data ?? {};
 
-    let seqRank = null;
+    const myLastClear = asDoubleOrNull(myStats.number_sequence_last_clear_seconds);
     const mySeq = asDoubleOrNull(myStats.number_sequence_best_seconds);
-    if (mySeq != null) {
-      const better = await supabaseAdmin
-        .from("game_stats")
-        .select("user_id")
-        .lt("number_sequence_best_seconds", mySeq)
-        .not("number_sequence_best_seconds", "is", null);
+    const mySeqValid =
+      mySeq != null &&
+      mySeq > 0 &&
+      (myLastClear == null || myLastClear > 0);
+
+    let seqRank = null;
+    if (mySeqValid) {
+      const better = await numberSequenceRankingFilters(
+        supabaseAdmin
+          .from("game_stats")
+          .select("user_id", { count: "exact", head: true })
+          .lt("number_sequence_best_seconds", mySeq),
+      );
       if (better.error) throw better.error;
-      seqRank = (better.data?.length ?? 0) + 1;
+      seqRank = (better.count ?? 0) + 1;
     }
 
     const myWord = asInt(myStats.word_game_level, 1);
-    const betterWord = await supabaseAdmin.from("game_stats").select("user_id").gt("word_game_level", myWord);
-    if (betterWord.error) throw betterWord.error;
+    let wordGameRank = null;
+    if (myWord > 1) {
+      const betterWord = await supabaseAdmin
+        .from("game_stats")
+        .select("user_id", { count: "exact", head: true })
+        .gt("word_game_level", myWord)
+        .gt("word_game_level", 1);
+      if (betterWord.error) throw betterWord.error;
+      wordGameRank = (betterWord.count ?? 0) + 1;
+    }
 
     const myCatch = asInt(myStats.cigarette_catch_best_score, 0);
-    const betterCatch = await supabaseAdmin.from("game_stats").select("user_id").gt("cigarette_catch_best_score", myCatch);
-    if (betterCatch.error) throw betterCatch.error;
+    let cigaretteCatchRank = null;
+    if (myCatch > 0) {
+      const betterCatch = await supabaseAdmin
+        .from("game_stats")
+        .select("user_id", { count: "exact", head: true })
+        .gt("cigarette_catch_best_score", myCatch)
+        .gt("cigarette_catch_best_score", 0);
+      if (betterCatch.error) throw betterCatch.error;
+      cigaretteCatchRank = (betterCatch.count ?? 0) + 1;
+    }
 
     const myTiming = asInt(myStats.timing_tap_best_score, 0);
-    const betterTiming = await supabaseAdmin.from("game_stats").select("user_id").gt("timing_tap_best_score", myTiming);
-    if (betterTiming.error) throw betterTiming.error;
+    let timingTapRank = null;
+    if (myTiming > 0) {
+      const betterTiming = await supabaseAdmin
+        .from("game_stats")
+        .select("user_id", { count: "exact", head: true })
+        .gt("timing_tap_best_score", myTiming)
+        .gt("timing_tap_best_score", 0);
+      if (betterTiming.error) throw betterTiming.error;
+      timingTapRank = (betterTiming.count ?? 0) + 1;
+    }
 
     const withName = (list) => (list ?? []).map((r) => ({ ...r, display_name: displayMap[r.user_id] ?? null }));
 
@@ -363,13 +415,14 @@ router.get("/rankings", async (req, res, next) => {
       },
       my: {
         numberSequenceBestSeconds: mySeq,
+        numberSequenceLastClearSeconds: myLastClear,
         wordGameLevel: myWord,
         cigaretteCatchBestScore: myCatch,
         timingTapBestScore: myTiming,
         numberSequenceRank: seqRank,
-        wordGameRank: (betterWord.data?.length ?? 0) + 1,
-        cigaretteCatchRank: (betterCatch.data?.length ?? 0) + 1,
-        timingTapRank: (betterTiming.data?.length ?? 0) + 1,
+        wordGameRank,
+        cigaretteCatchRank,
+        timingTapRank,
       },
     });
   } catch (err) {
