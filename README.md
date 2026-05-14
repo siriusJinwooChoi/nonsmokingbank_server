@@ -74,6 +74,7 @@ JWT_AUDIENCE=authenticated
 **나의 드림카** 연동을 위해 아래 마이그레이션을 SQL 에디터에서 한 번 실행하세요.
 
 - `supabase/migrations/20260205120000_dream_car_progress.sql` — `dream_car_progress` 테이블 (`dream_car_brand`, `dream_car_stage`)
+- `migrations/20260514120000_attendance_check_ins.sql` — 출석일별 이력 `attendance_check_ins` (BFF 출석 달력 동기화)
 
 기존 프로젝트에 테이블이 없으면 `pull` 시 오류가 날 수 있습니다.
 
@@ -84,7 +85,7 @@ JWT_AUDIENCE=authenticated
 - `GET|PATCH /v1/profile` (JWT)
 - `GET /v1/sync/pull`, `PUT /v1/sync/push` (JWT)
 - `GET|PUT /v1/reasons`, `PUT /v1/reasons/pinned`, `PUT /v1/reasons/sync` (JWT)
-- `GET /v1/attendance/state`, `POST /v1/attendance/check-in` (JWT)
+- `GET /v1/attendance/state`, `POST /v1/attendance/check-in` (JWT) — `state`/`check-in` 응답에 `attendedDates`(yyyy-MM-dd 문자열 배열, 서버에 기록된 출석일) 포함
 - `GET /v1/coins/balance`, `POST /v1/coins/consume` (JWT)
 - `PUT /v1/games/stats`, `GET /v1/games/reward/settings`, `POST /v1/games/reward/claim`, `GET /v1/games/rankings` (JWT)
 

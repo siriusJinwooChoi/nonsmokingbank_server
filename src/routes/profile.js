@@ -111,6 +111,7 @@ router.delete("/account", async (req, res, next) => {
       supabaseAdmin.from("quit_progress").delete().eq("user_id", userId),
       supabaseAdmin.from("reasons").delete().eq("user_id", userId),
       supabaseAdmin.from("notification_settings").delete().eq("user_id", userId),
+      supabaseAdmin.from("attendance_check_ins").delete().eq("user_id", userId),
       supabaseAdmin.from("coins_and_attendance").delete().eq("user_id", userId),
       supabaseAdmin.from("tree_progress").delete().eq("user_id", userId),
       supabaseAdmin.from("dream_car_progress").delete().eq("user_id", userId),

@@ -34,6 +34,22 @@ function isWeekendYmd(s) {
   return weekday === 0 || weekday === 6;
 }
 
+/** @param {string} userId */
+async function listAttendedDatesForUser(userId) {
+  const { data, error } = await supabaseAdmin
+    .from("attendance_check_ins")
+    .select("check_in_date")
+    .eq("user_id", userId)
+    .order("check_in_date", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => {
+    const v = row.check_in_date;
+    if (typeof v === "string") return v.slice(0, 10);
+    if (v == null) return "";
+    return String(v).slice(0, 10);
+  }).filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
+}
+
 router.get("/state", async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -48,11 +64,20 @@ router.get("/state", async (req, res, next) => {
     const streakDay = Number(data?.attendance_streak_day ?? 1);
     const lastDate = data?.attendance_last_date ?? null;
 
+    let attendedDates = [];
+    try {
+      attendedDates = await listAttendedDatesForUser(userId);
+    } catch (e) {
+      // 마이그레이션 전 배포 등으로 테이블이 없을 때에도 코인/스트릭은 반환
+      if (e?.code !== "42P01") throw e;
+    }
+
     return res.status(200).json({
       ok: true,
       coins,
       streakDay,
       lastDate,
+      attendedDates,
     });
   } catch (err) {
     return next(err);
@@ -82,6 +107,12 @@ router.post("/check-in", async (req, res, next) => {
     if (lastDate) {
       const diff = daysBetweenYmd(lastDate, today);
       if (diff === 0) {
+        let attendedDates = [];
+        try {
+          attendedDates = await listAttendedDatesForUser(userId);
+        } catch (e) {
+          if (e?.code !== "42P01") throw e;
+        }
         return res.status(200).json({
           ok: true,
           alreadyAttended: true,
@@ -89,6 +120,7 @@ router.post("/check-in", async (req, res, next) => {
           coins,
           streakDay,
           lastDate,
+          attendedDates,
         });
       }
       // 미출석 날짜가 있어도 streakDay를 초기화하지 않고 그대로 유지한다.
@@ -118,6 +150,19 @@ router.post("/check-in", async (req, res, next) => {
     );
     if (upsertErr) throw upsertErr;
 
+    const { error: histErr } = await supabaseAdmin.from("attendance_check_ins").insert({
+      user_id: userId,
+      check_in_date: today,
+    });
+    if (histErr && histErr.code !== "23505") throw histErr;
+
+    let attendedDates = [];
+    try {
+      attendedDates = await listAttendedDatesForUser(userId);
+    } catch (e) {
+      if (e?.code !== "42P01") throw e;
+    }
+
     return res.status(200).json({
       ok: true,
       alreadyAttended: false,
@@ -126,6 +171,7 @@ router.post("/check-in", async (req, res, next) => {
       coins,
       streakDay: nextStreakDay,
       lastDate: today,
+      attendedDates,
     });
   } catch (err) {
     return next(err);
