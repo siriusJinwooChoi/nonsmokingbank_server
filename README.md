@@ -75,6 +75,7 @@ JWT_AUDIENCE=authenticated
 
 - `supabase/migrations/20260205120000_dream_car_progress.sql` — `dream_car_progress` 테이블 (`dream_car_brand`, `dream_car_stage`)
 - `migrations/20260514120000_attendance_check_ins.sql` — 출석일별 이력 `attendance_check_ins` (BFF 출석 달력 동기화)
+- `migrations/20260515100000_fcm_pattern_last_sent_by_slot.sql` — FCM 패턴 알림 슬롯별 일 1회 중복 방지 컬럼
 
 기존 프로젝트에 테이블이 없으면 `pull` 시 오류가 날 수 있습니다.
 
@@ -86,6 +87,7 @@ JWT_AUDIENCE=authenticated
 - `GET /v1/sync/pull`, `PUT /v1/sync/push` (JWT)
 - `GET|PUT /v1/reasons`, `PUT /v1/reasons/pinned`, `PUT /v1/reasons/sync` (JWT)
 - `GET /v1/attendance/state`, `POST /v1/attendance/check-in` (JWT) — `state`/`check-in` 응답에 `attendedDates`(yyyy-MM-dd 문자열 배열, 서버에 기록된 출석일) 포함
+- FCM 크론(`ENABLE_FCM_REMINDER_CRON`): 일일·수집·출석·이유·미접속에 더해 **흡연 패턴 미리 알림**(DB `pattern_reminder_slots_json` + KST 시·분 일치 시 발송, `fcm_pattern_last_sent_ymd_by_slot`으로 슬롯별 일 1회)
 - `GET /v1/coins/balance`, `POST /v1/coins/consume` (JWT)
 - `PUT /v1/games/stats`, `GET /v1/games/reward/settings`, `POST /v1/games/reward/claim`, `GET /v1/games/rankings` (JWT)
 

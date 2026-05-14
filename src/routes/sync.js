@@ -146,7 +146,7 @@ router.put("/push", async (req, res, next) => {
       const { data: existingNotif } = await supabaseAdmin
         .from("notification_settings")
         .select(
-          "fcm_token, fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, pattern_reminder_enabled, pattern_reminder_slots_json",
+          "fcm_token, fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, fcm_pattern_last_sent_ymd_by_slot, pattern_reminder_enabled, pattern_reminder_slots_json",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -169,6 +169,8 @@ router.put("/push", async (req, res, next) => {
           fcm_token: existingNotif?.fcm_token ?? null,
           fcm_last_inactivity_sent_ms: existingNotif?.fcm_last_inactivity_sent_ms ?? null,
           fcm_last_reason_sent_ymd: existingNotif?.fcm_last_reason_sent_ymd ?? null,
+          fcm_pattern_last_sent_ymd_by_slot:
+            existingNotif?.fcm_pattern_last_sent_ymd_by_slot ?? {},
         },
         { onConflict: "user_id" },
       );

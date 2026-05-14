@@ -42,6 +42,41 @@ function reasonBody(text) {
   return t ?? "오늘도 금연을 이어가세요!";
 }
 
+/** 피크 시각 기준 3분 전 알림 시각 (앱 [daily_reminder_worker] schedulePatternRemindersFromSlots 와 동일) */
+function patternNotifyHourMinuteFromPeak(peakHour, peakMinute) {
+  let nh = Number(peakHour);
+  let nm = Number(peakMinute) - 3;
+  if (nm < 0) {
+    nm += 60;
+    nh -= 1;
+  }
+  if (nh < 0) nh += 24;
+  return { hour: nh, minute: nm };
+}
+
+function patternReminderSlotsList(slotsJson) {
+  if (!Array.isArray(slotsJson)) return [];
+  const out = [];
+  for (let i = 0; i < slotsJson.length; i++) {
+    const item = slotsJson[i];
+    if (!item || typeof item !== "object") continue;
+    const h = item.h ?? item.hour;
+    const m = item.m ?? item.minute ?? 0;
+    if (h === undefined || h === null) continue;
+    out.push({
+      slotIndex: i,
+      peakHour: Number(h),
+      peakMinute: Number(m),
+    });
+  }
+  return out;
+}
+
+function displayNameForPattern(name) {
+  const t = name != null ? String(name).trim() : "";
+  return t !== "" ? t : "회원";
+}
+
 let _lastTickKey = "";
 
 async function sendFcm(messaging, token, title, body, channelId) {
@@ -76,7 +111,8 @@ export async function tickFcmDailyReminders() {
     .select(
       "user_id, reminder_times_json, fcm_token, attendance_reminder_enabled, cigarette_collection_reminder_enabled, " +
         "reason_notification_enabled, inactivity_notification_enabled, last_app_open_time_ms, " +
-        "fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd",
+        "fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, pattern_reminder_enabled, pattern_reminder_slots_json, " +
+        "fcm_pattern_last_sent_ymd_by_slot",
     )
     .not("fcm_token", "is", null);
 
@@ -114,6 +150,19 @@ export async function tickFcmDailyReminders() {
     }
   }
 
+  let displayNameMap = new Map();
+  if (userIds.length > 0) {
+    const { data: profRows, error: profErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", userIds);
+    if (profErr) {
+      console.error("[fcmDailyReminderCron] profiles select error:", profErr.message);
+    } else {
+      displayNameMap = new Map((profRows ?? []).map((p) => [p.id, p.display_name]));
+    }
+  }
+
   const messaging = app.messaging();
 
   for (const row of rows ?? []) {
@@ -124,6 +173,7 @@ export async function tickFcmDailyReminders() {
     const collectionOn = notifEnabled(row.cigarette_collection_reminder_enabled);
     const inactivityOn = notifEnabled(row.inactivity_notification_enabled);
     const reasonNotifOn = row.reason_notification_enabled === true;
+    const patternOn = notifEnabled(row.pattern_reminder_enabled);
 
     const lastDate = coinMap.get(row.user_id);
     const attendedToday = attendanceDatePrefix(lastDate) === todayYmd;
@@ -139,6 +189,41 @@ export async function tickFcmDailyReminders() {
         );
       } catch (e) {
         console.error("[fcmDailyReminderCron] daily send failed user", row.user_id, e?.message ?? e);
+      }
+    }
+
+    // 흡연 패턴 미리 알림 (로컬 zonedSchedule 대체): 피크 시각 3분 전, 슬롯별 일 1회
+    if (patternOn) {
+      const slots = patternReminderSlotsList(row.pattern_reminder_slots_json);
+      for (const slot of slots) {
+        const { hour: nh, minute: nm } = patternNotifyHourMinuteFromPeak(slot.peakHour, slot.peakMinute);
+        if (nh !== hour || nm !== minute) continue;
+        const dedup = row.fcm_pattern_last_sent_ymd_by_slot;
+        const dedupObj = dedup && typeof dedup === "object" && !Array.isArray(dedup) ? dedup : {};
+        const key = String(slot.slotIndex);
+        if (dedupObj[key] === todayYmd) continue;
+        const nick = displayNameForPattern(displayNameMap.get(row.user_id));
+        try {
+          await sendFcm(
+            messaging,
+            token,
+            "흡연 패턴 미리 알림",
+            `(${nick})님은 이 시간대에 담배를 피고 싶어하세요. 참아보세요!`,
+            "smoking_pattern_channel",
+          );
+          const nextDedup = { ...dedupObj, [key]: todayYmd };
+          const { error: patUpErr } = await supabaseAdmin
+            .from("notification_settings")
+            .update({ fcm_pattern_last_sent_ymd_by_slot: nextDedup })
+            .eq("user_id", row.user_id);
+          if (patUpErr) {
+            console.error("[fcmDailyReminderCron] pattern dedup update failed", row.user_id, patUpErr.message);
+          } else {
+            row.fcm_pattern_last_sent_ymd_by_slot = nextDedup;
+          }
+        } catch (e) {
+          console.error("[fcmDailyReminderCron] pattern send failed user", row.user_id, e?.message ?? e);
+        }
       }
     }
 
