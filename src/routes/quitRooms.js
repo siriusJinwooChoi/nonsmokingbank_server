@@ -1,6 +1,7 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { uploadQuitRoomImage } from "../lib/quitRoomImageStorage.js";
 
 const router = Router();
 
@@ -317,7 +318,7 @@ router.get("/:roomId/posts", async (req, res, next) => {
 
 /**
  * POST /v1/quit-rooms/:roomId/posts
- * body: { content?, image_url?, post_type?: "text"|"share"|"sos" }
+ * body: { content?, image_url?, image_base64?, image_content_type?, post_type?: "text"|"share"|"sos" }
  */
 router.post("/:roomId/posts", async (req, res, next) => {
   try {
@@ -338,7 +339,7 @@ router.post("/:roomId/posts", async (req, res, next) => {
       typeof req.body?.content === "string"
         ? req.body.content.trim().slice(0, 1000)
         : "";
-    const imageUrl =
+    let imageUrl =
       typeof req.body?.image_url === "string"
         ? req.body.image_url.trim()
         : null;
@@ -346,10 +347,32 @@ router.post("/:roomId/posts", async (req, res, next) => {
       ? req.body.post_type
       : "text";
 
+    // base64 이미지 → Supabase Storage 업로드 후 URL 저장
+    if (!imageUrl && req.body?.image_base64) {
+      const contentType =
+        typeof req.body?.image_content_type === "string"
+          ? req.body.image_content_type.trim()
+          : "image/jpeg";
+      try {
+        imageUrl = await uploadQuitRoomImage({
+          roomId,
+          userId,
+          base64: req.body.image_base64,
+          contentType,
+        });
+      } catch (uploadErr) {
+        const status = uploadErr.status ?? 500;
+        return res.status(status).json({
+          error: "UPLOAD_FAILED",
+          message: uploadErr.message ?? "Image upload failed",
+        });
+      }
+    }
+
     if (!content && !imageUrl) {
       return res
         .status(400)
-        .json({ error: "BAD_REQUEST", message: "content or image_url required" });
+        .json({ error: "BAD_REQUEST", message: "content or image required" });
     }
 
     const { data: post, error } = await supabaseAdmin
@@ -358,7 +381,7 @@ router.post("/:roomId/posts", async (req, res, next) => {
         room_id: roomId,
         author_id: userId,
         author_nickname: mem.nickname,
-        content,
+        content: content || (imageUrl ? "📷 사진을 공유했어요" : ""),
         image_url: imageUrl,
         is_sos_alert: postType === "sos",
       })
