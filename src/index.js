@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 import { env, validateEnv } from "./config/env.js";
@@ -30,7 +31,39 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json({ limit: "1mb" }));
+
+// ── Rate Limiting ──────────────────────────────────────────────────────────
+// 인증 엔드포인트: 1분에 최대 10회 (브루트포스 방지)
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "TOO_MANY_REQUESTS", message: "Too many requests, please try again later." },
+  skip: () => nodeEnv !== "production",
+});
+
+// 일반 API: 1분에 최대 120회
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "TOO_MANY_REQUESTS", message: "Too many requests, please try again later." },
+  skip: () => nodeEnv !== "production",
+});
+
+app.use("/v1/auth", authLimiter);
+app.use("/v1", generalLimiter);
+// ──────────────────────────────────────────────────────────────────────────
+
+// 일반 API: 1MB / 이미지 base64 업로드가 포함된 경로만 10MB 허용
+app.use((req, res, next) => {
+  const isImageRoute =
+    req.method === "POST" &&
+    /^\/v1\/quit-rooms\/[^/]+\/posts/.test(req.path);
+  express.json({ limit: isImageRoute ? "10mb" : "1mb" })(req, res, next);
+});
 app.use(morgan(nodeEnv === "production" ? "combined" : "dev"));
 
 app.get("/", (req, res) => {
