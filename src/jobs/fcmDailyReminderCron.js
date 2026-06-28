@@ -4,9 +4,6 @@ import { hourMinuteInSeoulNow } from "../lib/kstTime.js";
 import { ymdInSeoulNow } from "../lib/kstDate.js";
 import { env } from "../config/env.js";
 
-/** 09/12/18/22 정각 담배 수집 알림 (로컬과 동일) */
-const COLLECTION_HOURS = [9, 12, 18, 22];
-
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const INACTIVITY_THRESHOLD_MS = 3 * MS_PER_DAY;
 const INACTIVITY_REPEAT_MS = MS_PER_DAY;
@@ -16,8 +13,6 @@ function matchesReminderNow(reminderTimesJson, hour, minute) {
   if (!Array.isArray(reminderTimesJson)) return false;
   for (const item of reminderTimesJson) {
     if (!item || typeof item !== "object") continue;
-    const keys = Object.keys(item);
-    if (keys.length === 0) continue;
     const h = item.h ?? item.hour;
     const m = item.m ?? item.minute ?? 0;
     if (h === undefined || h === null) continue;
@@ -26,15 +21,9 @@ function matchesReminderNow(reminderTimesJson, hour, minute) {
   return false;
 }
 
-/** null/undefined → 켜짐 (sync triBool과 동일) */
+/** null/undefined → 켜짐 */
 function notifEnabled(val) {
   return val !== false;
-}
-
-function attendanceDatePrefix(v) {
-  if (v == null) return null;
-  const s = String(v);
-  return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
 function reasonBody(text) {
@@ -42,7 +31,7 @@ function reasonBody(text) {
   return t ?? "오늘도 금연을 이어가세요!";
 }
 
-/** 피크 시각 기준 3분 전 알림 시각 (앱 [daily_reminder_worker] schedulePatternRemindersFromSlots 와 동일) */
+/** 피크 시각 기준 3분 전 알림 시각 */
 function patternNotifyHourMinuteFromPeak(peakHour, peakMinute) {
   let nh = Number(peakHour);
   let nm = Number(peakMinute) - 3;
@@ -63,11 +52,7 @@ function patternReminderSlotsList(slotsJson) {
     const h = item.h ?? item.hour;
     const m = item.m ?? item.minute ?? 0;
     if (h === undefined || h === null) continue;
-    out.push({
-      slotIndex: i,
-      peakHour: Number(h),
-      peakMinute: Number(m),
-    });
+    out.push({ slotIndex: i, peakHour: Number(h), peakMinute: Number(m) });
   }
   return out;
 }
@@ -85,10 +70,7 @@ async function sendFcm(messaging, token, title, body, channelId) {
     notification: { title, body },
     android: {
       priority: "high",
-      notification: {
-        channelId,
-        sound: "default",
-      },
+      notification: { channelId, sound: "default" },
     },
   });
 }
@@ -106,13 +88,14 @@ export async function tickFcmDailyReminders() {
   const todayYmd = ymdInSeoulNow();
   const nowMs = Date.now();
 
+  // 알림 설정 조회 (신규 스키마: calendar_reminder_enabled)
   const { data: rows, error } = await supabaseAdmin
     .from("notification_settings")
     .select(
-      "user_id, reminder_times_json, fcm_token, attendance_reminder_enabled, cigarette_collection_reminder_enabled, " +
+      "user_id, reminder_times_json, fcm_token, calendar_reminder_enabled, " +
         "reason_notification_enabled, inactivity_notification_enabled, last_app_open_time_ms, " +
-        "fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, pattern_reminder_enabled, pattern_reminder_slots_json, " +
-        "fcm_pattern_last_sent_ymd_by_slot",
+        "fcm_last_inactivity_sent_ms, fcm_last_reason_sent_ymd, pattern_reminder_enabled, " +
+        "pattern_reminder_slots_json, fcm_pattern_last_sent_ymd_by_slot",
     )
     .not("fcm_token", "is", null);
 
@@ -122,27 +105,29 @@ export async function tickFcmDailyReminders() {
   }
 
   const userIds = (rows ?? []).map((r) => r.user_id).filter(Boolean);
-  let coinMap = new Map();
-  if (userIds.length > 0) {
-    const { data: coins, error: coinErr } = await supabaseAdmin
-      .from("coins_and_attendance")
-      .select("user_id, attendance_last_date")
-      .in("user_id", userIds);
 
-    if (coinErr) {
-      console.error("[fcmDailyReminderCron] coins_and_attendance select error:", coinErr.message);
+  // quit_calendar에서 오늘 기록이 있는 사용자 집합
+  let calendarRecordedSet = new Set();
+  if (userIds.length > 0) {
+    const { data: calData, error: calErr } = await supabaseAdmin
+      .from("quit_calendar")
+      .select("user_id")
+      .in("user_id", userIds)
+      .eq("record_date", todayYmd);
+    if (calErr) {
+      console.error("[fcmDailyReminderCron] quit_calendar select error:", calErr.message);
     } else {
-      coinMap = new Map((coins ?? []).map((c) => [c.user_id, c.attendance_last_date]));
+      calendarRecordedSet = new Set((calData ?? []).map((r) => r.user_id));
     }
   }
 
+  // 금연 이유 조회
   let reasonMap = new Map();
   if (userIds.length > 0) {
     const { data: reasonRows, error: reasonErr } = await supabaseAdmin
       .from("reasons")
       .select("user_id, selected_reason_text")
       .in("user_id", userIds);
-
     if (reasonErr) {
       console.error("[fcmDailyReminderCron] reasons select error:", reasonErr.message);
     } else {
@@ -150,6 +135,7 @@ export async function tickFcmDailyReminders() {
     }
   }
 
+  // 닉네임 조회
   let displayNameMap = new Map();
   if (userIds.length > 0) {
     const { data: profRows, error: profErr } = await supabaseAdmin
@@ -169,15 +155,14 @@ export async function tickFcmDailyReminders() {
     const token = row.fcm_token;
     if (!token || typeof token !== "string") continue;
 
-    const attendanceOn = notifEnabled(row.attendance_reminder_enabled);
-    const collectionOn = notifEnabled(row.cigarette_collection_reminder_enabled);
+    const calendarOn = notifEnabled(row.calendar_reminder_enabled);
     const inactivityOn = notifEnabled(row.inactivity_notification_enabled);
     const reasonNotifOn = row.reason_notification_enabled === true;
     const patternOn = notifEnabled(row.pattern_reminder_enabled);
 
-    const lastDate = coinMap.get(row.user_id);
-    const attendedToday = attendanceDatePrefix(lastDate) === todayYmd;
+    const recordedToday = calendarRecordedSet.has(row.user_id);
 
+    // 사용자가 설정한 시각에 금연 리마인더
     if (matchesReminderNow(row.reminder_times_json, hour, minute)) {
       try {
         await sendFcm(
@@ -192,23 +177,31 @@ export async function tickFcmDailyReminders() {
       }
     }
 
-    // 흡연 패턴 미리 알림 (로컬 zonedSchedule 대체): 피크 시각 3분 전, 슬롯별 일 1회
+    // 흡연 패턴 미리 알림: 피크 시각 3분 전, 슬롯별 일 1회
     if (patternOn) {
       const slots = patternReminderSlotsList(row.pattern_reminder_slots_json);
       for (const slot of slots) {
-        const { hour: nh, minute: nm } = patternNotifyHourMinuteFromPeak(slot.peakHour, slot.peakMinute);
+        const { hour: nh, minute: nm } = patternNotifyHourMinuteFromPeak(
+          slot.peakHour,
+          slot.peakMinute,
+        );
         if (nh !== hour || nm !== minute) continue;
+
         const dedup = row.fcm_pattern_last_sent_ymd_by_slot;
-        const dedupObj = dedup && typeof dedup === "object" && !Array.isArray(dedup) ? dedup : {};
+        const dedupObj =
+          dedup && typeof dedup === "object" && !Array.isArray(dedup)
+            ? dedup
+            : {};
         const key = String(slot.slotIndex);
         if (dedupObj[key] === todayYmd) continue;
+
         const nick = displayNameForPattern(displayNameMap.get(row.user_id));
         try {
           await sendFcm(
             messaging,
             token,
             "흡연 패턴 미리 알림",
-            `(${nick})님은 이 시간대에 담배를 피고 싶어하세요. 참아보세요!`,
+            `${nick}님은 이 시간대에 담배를 피고 싶어하세요. 참아보세요!`,
             "smoking_pattern_channel",
           );
           const nextDedup = { ...dedupObj, [key]: todayYmd };
@@ -227,35 +220,22 @@ export async function tickFcmDailyReminders() {
       }
     }
 
-    if (collectionOn && minute === 0 && COLLECTION_HOURS.includes(hour)) {
+    // 18시 이후 금연 캘린더 미기록 시 매 정각 알림
+    if (calendarOn && hour >= 18 && minute === 0 && !recordedToday) {
       try {
         await sendFcm(
           messaging,
           token,
-          "수집 가능 시간",
-          "지금부터 20분간 도감 수집을 시도할 수 있어요.",
-          "cigarette_collection_reminder_channel",
+          "오늘의 금연 기록",
+          "아직 오늘의 금연 기록이 없어요. 잠깐 앱을 열어 기록해보세요! 🌿",
+          "calendar_reminder_channel",
         );
       } catch (e) {
-        console.error("[fcmDailyReminderCron] collection send failed user", row.user_id, e?.message ?? e);
+        console.error("[fcmDailyReminderCron] calendar send failed user", row.user_id, e?.message ?? e);
       }
     }
 
-    // 18시 이후 미출석: 정각마다 1시간 간격 (KST 분==0)
-    if (attendanceOn && hour >= 18 && minute === 0 && !attendedToday) {
-      try {
-        await sendFcm(
-          messaging,
-          token,
-          "금연뱅크 출석",
-          "금연코인 획득을 위해 금연뱅크에 출석하셔야 합니다.",
-          "attendance_reminder_channel",
-        );
-      } catch (e) {
-        console.error("[fcmDailyReminderCron] attendance send failed user", row.user_id, e?.message ?? e);
-      }
-    }
-
+    // 매일 12:01 금연 이유 알림
     if (reasonNotifOn && hour === 12 && minute === 1 && row.fcm_last_reason_sent_ymd !== todayYmd) {
       try {
         const body = reasonBody(reasonMap.get(row.user_id));
@@ -272,6 +252,7 @@ export async function tickFcmDailyReminders() {
       }
     }
 
+    // 3일 이상 앱 미사용 시 비활성 알림 (일 1회)
     if (inactivityOn) {
       const lastOpen = row.last_app_open_time_ms;
       if (lastOpen != null && lastOpen > 0) {

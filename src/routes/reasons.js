@@ -15,8 +15,17 @@ function toReasonItem(raw, fallbackOrder = 1) {
     text,
     pinned: Boolean(raw?.pinned),
     createdAt: Number.isFinite(raw?.createdAt) ? Number(raw.createdAt) : now,
-    displayNumber: Number.isFinite(raw?.displayNumber) ? Number(raw.displayNumber) : fallbackOrder,
+    displayNumber: Number.isFinite(raw?.displayNumber)
+      ? Number(raw.displayNumber)
+      : fallbackOrder,
   };
+}
+
+/** reasons_json 배열에서 pinned 항목의 text를 추출 */
+function extractPinnedText(reasonsJson) {
+  if (!Array.isArray(reasonsJson)) return "";
+  const pinned = reasonsJson.find((r) => r?.pinned);
+  return normalizeText(pinned?.text);
 }
 
 router.get("/", async (req, res, next) => {
@@ -24,19 +33,22 @@ router.get("/", async (req, res, next) => {
     const userId = req.user.id;
     const { data, error } = await supabaseAdmin
       .from("reasons")
-      .select("reasons_json, pinned_reason_text, selected_reason_id, selected_reason_text")
+      .select("reasons_json, selected_reason_id, selected_reason_text")
       .eq("user_id", userId)
       .maybeSingle();
-
     if (error) throw error;
 
-    const reasonsJson = Array.isArray(data?.reasons_json) ? data.reasons_json : [];
-    const reasons = reasonsJson.map((item, idx) => toReasonItem(item, idx + 1)).filter((r) => r.text);
+    const reasonsJson = Array.isArray(data?.reasons_json)
+      ? data.reasons_json
+      : [];
+    const reasons = reasonsJson
+      .map((item, idx) => toReasonItem(item, idx + 1))
+      .filter((r) => r.text);
 
     return res.status(200).json({
       ok: true,
       reasons,
-      pinnedReasonText: data?.pinned_reason_text ?? "",
+      pinnedReasonText: extractPinnedText(reasonsJson),
       selectedReasonId: data?.selected_reason_id ?? null,
       selectedReasonText: data?.selected_reason_text ?? null,
     });
@@ -51,10 +63,14 @@ router.put("/pinned", async (req, res, next) => {
     const text = normalizeText(req.body?.text);
 
     if (!text) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "text is required" });
+      return res
+        .status(400)
+        .json({ error: "BAD_REQUEST", message: "text is required" });
     }
     if (text.length > 120) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "text must be <= 120 chars" });
+      return res
+        .status(400)
+        .json({ error: "BAD_REQUEST", message: "text must be <= 120 chars" });
     }
 
     const { data: row, error: getErr } = await supabaseAdmin
@@ -68,7 +84,6 @@ router.put("/pinned", async (req, res, next) => {
     const list = existing.map((item, idx) => toReasonItem(item, idx + 1));
     const now = Date.now();
 
-    /** 메인에서 문구만 바꿀 때 새 행이 생기지 않도록, 기존 고정 항목을 갱신 */
     let previouslyPinned = null;
     for (const r of list) {
       if (r.pinned) {
@@ -89,7 +104,10 @@ router.put("/pinned", async (req, res, next) => {
     } else {
       target = list.find((r) => normalizeText(r.text) === text);
       if (!target) {
-        const maxDisplay = list.reduce((m, r) => Math.max(m, Number(r.displayNumber || 0)), 0);
+        const maxDisplay = list.reduce(
+          (m, r) => Math.max(m, Number(r.displayNumber || 0)),
+          0,
+        );
         target = {
           id: String(now),
           text,
@@ -107,16 +125,16 @@ router.put("/pinned", async (req, res, next) => {
     const payload = {
       user_id: userId,
       reasons_json: list,
-      pinned_reason_text: text,
     };
-    const selId = row?.selected_reason_id != null ? String(row.selected_reason_id) : null;
+    const selId =
+      row?.selected_reason_id != null ? String(row.selected_reason_id) : null;
     if (previouslyPinned && selId && previouslyPinned.id === selId) {
       payload.selected_reason_text = text;
     }
 
-    const { error: upsertErr } = await supabaseAdmin.from("reasons").upsert(payload, {
-      onConflict: "user_id",
-    });
+    const { error: upsertErr } = await supabaseAdmin
+      .from("reasons")
+      .upsert(payload, { onConflict: "user_id" });
     if (upsertErr) throw upsertErr;
 
     return res.status(200).json({
@@ -134,15 +152,14 @@ router.put("/sync", async (req, res, next) => {
   try {
     const userId = req.user.id;
     const inputReasons = Array.isArray(req.body?.reasons) ? req.body.reasons : [];
-    const pinnedReasonText = normalizeText(req.body?.pinnedReasonText);
     const selectedReasonId = normalizeText(req.body?.selectedReasonId) || null;
-    const selectedReasonText = normalizeText(req.body?.selectedReasonText) || null;
+    const selectedReasonText =
+      normalizeText(req.body?.selectedReasonText) || null;
 
     const reasons = inputReasons
       .map((item, idx) => toReasonItem(item, idx + 1))
       .filter((r) => normalizeText(r.text).length > 0);
 
-    // pinned 는 하나만 유지
     let foundPinned = false;
     for (const r of reasons) {
       if (r.pinned && !foundPinned) {
@@ -152,14 +169,10 @@ router.put("/sync", async (req, res, next) => {
       }
     }
 
-    const finalPinnedText =
-      pinnedReasonText || reasons.find((r) => r.pinned)?.text || null;
-
     const { error } = await supabaseAdmin.from("reasons").upsert(
       {
         user_id: userId,
         reasons_json: reasons,
-        pinned_reason_text: finalPinnedText,
         selected_reason_id: selectedReasonId,
         selected_reason_text: selectedReasonText,
       },
@@ -170,7 +183,7 @@ router.put("/sync", async (req, res, next) => {
     return res.status(200).json({
       ok: true,
       reasons,
-      pinnedReasonText: finalPinnedText ?? "",
+      pinnedReasonText: extractPinnedText(reasons),
       selectedReasonId,
       selectedReasonText,
     });
@@ -180,4 +193,3 @@ router.put("/sync", async (req, res, next) => {
 });
 
 export default router;
-

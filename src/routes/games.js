@@ -1,6 +1,4 @@
 import { Router } from "express";
-import { env } from "../config/env.js";
-import { ymdInSeoulNow } from "../lib/kstDate.js";
 import {
   asDoubleOrNull,
   asInt,
@@ -11,21 +9,12 @@ import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
 
-function isStatsFresh(statsUpdatedAt, maxAgeMinutes) {
-  if (!statsUpdatedAt) return false;
-  const t = new Date(statsUpdatedAt).getTime();
-  if (!Number.isFinite(t)) return false;
-  const ageMs = Date.now() - t;
-  return ageMs >= 0 && ageMs <= maxAgeMinutes * 60 * 1000;
-}
-
 router.put("/stats", async (req, res, next) => {
   try {
     const userId = req.user.id;
     const body = req.body ?? {};
 
     let numberSequenceBestSeconds = asDoubleOrNull(body.numberSequenceBestSeconds);
-    // 0초는 null과 달리 DB에 남아 랭킹 상단을 오염시킬 수 있어 저장하지 않음
     if (numberSequenceBestSeconds != null && numberSequenceBestSeconds <= 0) {
       numberSequenceBestSeconds = null;
     }
@@ -34,23 +23,27 @@ router.put("/stats", async (req, res, next) => {
     const cigaretteCatchBestStage = asInt(body.cigaretteCatchBestStage, 0);
     const cigaretteCatchBestScore = asInt(body.cigaretteCatchBestScore, 0);
 
-    const prevRes = await supabaseAdmin.from("game_stats").select("*").eq("user_id", userId).maybeSingle();
+    const prevRes = await supabaseAdmin
+      .from("game_stats")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
     if (prevRes.error) throw prevRes.error;
     const prev = prevRes.data;
 
     const numberSequenceLastClearSeconds =
       body.numberSequenceLastClearSeconds === undefined
-        ? prev?.number_sequence_last_clear_seconds ?? null
+        ? (prev?.number_sequence_last_clear_seconds ?? null)
         : asDoubleOrNull(body.numberSequenceLastClearSeconds);
     const timingTapLastSessionScore =
       body.timingTapLastSessionScore === undefined
-        ? prev?.timing_tap_last_session_score ?? null
+        ? (prev?.timing_tap_last_session_score ?? null)
         : body.timingTapLastSessionScore === null
           ? null
           : asInt(body.timingTapLastSessionScore, 0);
     const cigaretteCatchLastSessionScore =
       body.cigaretteCatchLastSessionScore === undefined
-        ? prev?.cigarette_catch_last_session_score ?? null
+        ? (prev?.cigarette_catch_last_session_score ?? null)
         : body.cigaretteCatchLastSessionScore === null
           ? null
           : asInt(body.cigaretteCatchLastSessionScore, 0);
@@ -67,17 +60,16 @@ router.put("/stats", async (req, res, next) => {
     };
 
     const changed = gameStatsFieldsChanged(prev, incoming);
-    const payload = {
-      user_id: userId,
-      ...incoming,
-    };
+    const payload = { user_id: userId, ...incoming };
     if (changed) {
-      payload.stats_updated_at = new Date().toISOString();
-    } else if (prev?.stats_updated_at) {
-      payload.stats_updated_at = prev.stats_updated_at;
+      payload.updated_at = new Date().toISOString();
+    } else if (prev?.updated_at) {
+      payload.updated_at = prev.updated_at;
     }
 
-    const { error } = await supabaseAdmin.from("game_stats").upsert(payload, { onConflict: "user_id" });
+    const { error } = await supabaseAdmin
+      .from("game_stats")
+      .upsert(payload, { onConflict: "user_id" });
     if (error) throw error;
 
     return res.status(200).json({ ok: true });
@@ -86,203 +78,12 @@ router.put("/stats", async (req, res, next) => {
   }
 });
 
-/** 앱·운영자가 현재 서버 보상 정책을 확인할 때 사용 (비밀값 없음) */
-router.get("/reward/settings", (_req, res) => {
-  res.status(200).json({
-    ok: true,
-    rewardCoinsPerClaim: env.gameRewardCoinsPerClaim,
-    statsFreshMinutes: env.gameStatsFreshMinutes,
-    wordGameMinLevelForReward: env.wordGameMinLevelForReward,
-    timingTapMinBestScoreForReward: env.timingTapMinBestScoreForReward,
-    cigaretteCatchMinBestScoreForReward: env.cigaretteCatchMinBestScoreForReward,
-    timingTapMinSessionScoreForReward: env.timingTapMinSessionScoreForReward,
-    cigaretteCatchMinSessionScoreForReward: env.cigaretteCatchMinSessionScoreForReward,
-  });
-});
-
-/**
- * POST /v1/games/reward/claim
- * body: { game: "number_sequence" | "word_game" | "timing_tap" | "cigarette_catch", proof?: {...} }
- * 서버의 game_stats와 proof 일치 + 최근 동기화 + 당일 미수령 시 코인 지급
- */
-router.post("/reward/claim", async (req, res, next) => {
-  try {
-    const userId = req.user.id;
-    const game = req.body?.game;
-    const proof = req.body?.proof ?? {};
-
-    const allowed = new Set(["number_sequence", "word_game", "timing_tap", "cigarette_catch"]);
-    if (typeof game !== "string" || !allowed.has(game)) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "invalid game" });
-    }
-
-    const kstDate = ymdInSeoulNow();
-    const claimKey = `daily_reward:${kstDate}:${game}`;
-
-    const existing = await supabaseAdmin
-      .from("game_reward_claims")
-      .select("claim_key")
-      .eq("user_id", userId)
-      .eq("claim_key", claimKey)
-      .maybeSingle();
-    if (existing.error) throw existing.error;
-    if (existing.data) {
-      const bal = await supabaseAdmin
-        .from("coins_and_attendance")
-        .select("golden_coins")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (bal.error) throw bal.error;
-      const coins = asInt(bal.data?.golden_coins, 0);
-      return res.status(200).json({
-        ok: true,
-        alreadyClaimed: true,
-        granted: 0,
-        coins,
-      });
-    }
-
-    const statsRes = await supabaseAdmin.from("game_stats").select("*").eq("user_id", userId).maybeSingle();
-    if (statsRes.error) throw statsRes.error;
-    const stats = statsRes.data;
-    if (!stats) {
-      return res.status(400).json({ error: "NO_STATS", message: "sync game stats first" });
-    }
-
-    if (!isStatsFresh(stats.stats_updated_at, env.gameStatsFreshMinutes)) {
-      return res.status(400).json({
-        error: "STALE_STATS",
-        message: "game stats must be synced recently; call PUT /v1/games/stats then retry",
-      });
-    }
-
-    if (game === "number_sequence") {
-      const elapsed = asDoubleOrNull(proof.elapsedSeconds);
-      if (elapsed == null) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "elapsedSeconds required" });
-      }
-      const matchBest =
-        stats.number_sequence_best_seconds != null &&
-        seqSecondsEqual(elapsed, stats.number_sequence_best_seconds);
-      const matchLast =
-        stats.number_sequence_last_clear_seconds != null &&
-        seqSecondsEqual(elapsed, stats.number_sequence_last_clear_seconds);
-      if (!matchBest && !matchLast) {
-        return res.status(400).json({
-          error: "BAD_PROOF",
-          message: "elapsed does not match server best or last clear",
-        });
-      }
-    } else if (game === "word_game") {
-      const minLv = env.wordGameMinLevelForReward;
-      const level = asInt(proof.level, 0);
-      if (level < minLv) {
-        return res.status(400).json({
-          error: "BAD_PROOF",
-          message: `level must be >= ${minLv}`,
-        });
-      }
-      if (level !== asInt(stats.word_game_level, 1)) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "level does not match server" });
-      }
-    } else if (game === "timing_tap") {
-      const minSess = env.timingTapMinSessionScoreForReward;
-      if (proof.sessionScore === undefined || proof.sessionScore === null) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore required" });
-      }
-      const sessionScore = asInt(proof.sessionScore, -1);
-      if (sessionScore < minSess) {
-        return res.status(400).json({
-          error: "BAD_PROOF",
-          message: `sessionScore must be >= ${minSess}`,
-        });
-      }
-      const srv = stats.timing_tap_last_session_score;
-      if (srv == null || sessionScore !== asInt(srv, -2)) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore does not match server" });
-      }
-    } else if (game === "cigarette_catch") {
-      const minSess = env.cigaretteCatchMinSessionScoreForReward;
-      if (proof.sessionScore === undefined || proof.sessionScore === null) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore required" });
-      }
-      const sessionScore = asInt(proof.sessionScore, -1);
-      if (sessionScore < minSess) {
-        return res.status(400).json({
-          error: "BAD_PROOF",
-          message: `sessionScore must be >= ${minSess}`,
-        });
-      }
-      const srv = stats.cigarette_catch_last_session_score;
-      if (srv == null || sessionScore !== asInt(srv, -2)) {
-        return res.status(400).json({ error: "BAD_PROOF", message: "sessionScore does not match server" });
-      }
-    }
-
-    const coinRow = await supabaseAdmin
-      .from("coins_and_attendance")
-      .select("golden_coins, attendance_streak_day, attendance_last_date")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (coinRow.error) throw coinRow.error;
-
-    const rewardCoins = env.gameRewardCoinsPerClaim;
-    const currentCoins = asInt(coinRow.data?.golden_coins, 0);
-    const nextCoins = currentCoins + rewardCoins;
-
-    const ins = await supabaseAdmin.from("game_reward_claims").insert({
-      user_id: userId,
-      claim_key: claimKey,
-      coins_granted: rewardCoins,
-    });
-    if (ins.error) {
-      if (ins.error.code === "23505") {
-        const bal = await supabaseAdmin
-          .from("coins_and_attendance")
-          .select("golden_coins")
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (bal.error) throw bal.error;
-        return res.status(200).json({
-          ok: true,
-          alreadyClaimed: true,
-          granted: 0,
-          coins: asInt(bal.data?.golden_coins, 0),
-        });
-      }
-      throw ins.error;
-    }
-
-    const upd = await supabaseAdmin.from("coins_and_attendance").upsert(
-      {
-        user_id: userId,
-        golden_coins: nextCoins,
-        attendance_streak_day: asInt(coinRow.data?.attendance_streak_day, 1),
-        attendance_last_date: coinRow.data?.attendance_last_date ?? null,
-      },
-      { onConflict: "user_id" },
-    );
-    if (upd.error) {
-      await supabaseAdmin.from("game_reward_claims").delete().eq("user_id", userId).eq("claim_key", claimKey);
-      throw upd.error;
-    }
-
-    return res.status(200).json({
-      ok: true,
-      alreadyClaimed: false,
-      granted: rewardCoins,
-      coins: nextCoins,
-    });
-  } catch (err) {
-    return next(err);
-  }
-});
-
-/** 1~30 랭킹: 실제 클리어로 볼 수 있는 행만 (Supabase 일일 스냅샷·마이그레이션과 동일 기준) */
 function numberSequenceRankingFilters(q) {
   return q
     .gt("number_sequence_best_seconds", 0)
-    .or("number_sequence_last_clear_seconds.is.null,number_sequence_last_clear_seconds.gt.0");
+    .or(
+      "number_sequence_last_clear_seconds.is.null,number_sequence_last_clear_seconds.gt.0",
+    );
 }
 
 router.get("/rankings", async (req, res, next) => {
@@ -290,58 +91,72 @@ router.get("/rankings", async (req, res, next) => {
     const userId = req.user.id;
     const limit = Math.min(Math.max(asInt(req.query?.limit, 10), 1), 50);
 
-    const seqRes = await numberSequenceRankingFilters(
+    const [seqRes, wordRes, catchRes, timingRes] = await Promise.all([
+      numberSequenceRankingFilters(
+        supabaseAdmin
+          .from("game_stats")
+          .select(
+            "user_id, number_sequence_best_seconds, number_sequence_last_clear_seconds",
+          ),
+      )
+        .order("number_sequence_best_seconds", { ascending: true })
+        .limit(limit),
       supabaseAdmin
         .from("game_stats")
-        .select("user_id, number_sequence_best_seconds, number_sequence_last_clear_seconds"),
-    )
-      .order("number_sequence_best_seconds", { ascending: true })
-      .limit(limit);
+        .select("user_id, word_game_level")
+        .gt("word_game_level", 1)
+        .order("word_game_level", { ascending: false })
+        .limit(limit),
+      supabaseAdmin
+        .from("game_stats")
+        .select("user_id, cigarette_catch_best_score")
+        .gt("cigarette_catch_best_score", 0)
+        .order("cigarette_catch_best_score", { ascending: false })
+        .limit(limit),
+      supabaseAdmin
+        .from("game_stats")
+        .select("user_id, timing_tap_best_score")
+        .gt("timing_tap_best_score", 0)
+        .order("timing_tap_best_score", { ascending: false })
+        .limit(limit),
+    ]);
+
     if (seqRes.error) throw seqRes.error;
-
-    const wordRes = await supabaseAdmin
-      .from("game_stats")
-      .select("user_id, word_game_level")
-      .gt("word_game_level", 1)
-      .order("word_game_level", { ascending: false })
-      .limit(limit);
     if (wordRes.error) throw wordRes.error;
-
-    const catchRes = await supabaseAdmin
-      .from("game_stats")
-      .select("user_id, cigarette_catch_best_score")
-      .gt("cigarette_catch_best_score", 0)
-      .order("cigarette_catch_best_score", { ascending: false })
-      .limit(limit);
     if (catchRes.error) throw catchRes.error;
-
-    const timingRes = await supabaseAdmin
-      .from("game_stats")
-      .select("user_id, timing_tap_best_score")
-      .gt("timing_tap_best_score", 0)
-      .order("timing_tap_best_score", { ascending: false })
-      .limit(limit);
     if (timingRes.error) throw timingRes.error;
 
     const ids = new Set();
-    for (const row of [...(seqRes.data ?? []), ...(wordRes.data ?? []), ...(catchRes.data ?? []), ...(timingRes.data ?? [])]) {
+    for (const row of [
+      ...(seqRes.data ?? []),
+      ...(wordRes.data ?? []),
+      ...(catchRes.data ?? []),
+      ...(timingRes.data ?? []),
+    ]) {
       if (row.user_id) ids.add(row.user_id);
     }
 
     const profiles = ids.size
-      ? await supabaseAdmin.from("profiles").select("id, display_name").in("id", [...ids])
+      ? await supabaseAdmin
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", [...ids])
       : { data: [], error: null };
     if (profiles.error) throw profiles.error;
 
     const displayMap = {};
     for (const p of profiles.data ?? []) {
-      displayMap[p.id] = (typeof p.display_name === "string" && p.display_name.trim()) ? p.display_name.trim() : null;
+      displayMap[p.id] =
+        typeof p.display_name === "string" && p.display_name.trim()
+          ? p.display_name.trim()
+          : null;
     }
 
     const myStatsRes = await supabaseAdmin
       .from("game_stats")
       .select(
-        "number_sequence_best_seconds, number_sequence_last_clear_seconds, word_game_level, cigarette_catch_best_score, timing_tap_best_score",
+        "number_sequence_best_seconds, number_sequence_last_clear_seconds, " +
+          "word_game_level, cigarette_catch_best_score, timing_tap_best_score",
       )
       .eq("user_id", userId)
       .maybeSingle();
@@ -351,9 +166,7 @@ router.get("/rankings", async (req, res, next) => {
     const myLastClear = asDoubleOrNull(myStats.number_sequence_last_clear_seconds);
     const mySeq = asDoubleOrNull(myStats.number_sequence_best_seconds);
     const mySeqValid =
-      mySeq != null &&
-      mySeq > 0 &&
-      (myLastClear == null || myLastClear > 0);
+      mySeq != null && mySeq > 0 && (myLastClear == null || myLastClear > 0);
 
     let seqRank = null;
     if (mySeqValid) {
@@ -403,7 +216,11 @@ router.get("/rankings", async (req, res, next) => {
       timingTapRank = (betterTiming.count ?? 0) + 1;
     }
 
-    const withName = (list) => (list ?? []).map((r) => ({ ...r, display_name: displayMap[r.user_id] ?? null }));
+    const withName = (list) =>
+      (list ?? []).map((r) => ({
+        ...r,
+        display_name: displayMap[r.user_id] ?? null,
+      }));
 
     return res.status(200).json({
       ok: true,
@@ -431,4 +248,3 @@ router.get("/rankings", async (req, res, next) => {
 });
 
 export default router;
-

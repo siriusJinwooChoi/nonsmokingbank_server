@@ -1,65 +1,75 @@
 import { Router } from "express";
+import { asInt } from "../lib/numbers.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
 
-const asInt = (v, fallback = 0) => {
-  if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
-};
-
+/**
+ * POST /v1/smoking-patterns/logs
+ * body: { action: "smoked" | "craving" | "sos_pressed", eventAtMs?, note? }
+ *
+ * smoking_events 테이블에 기록 (구 smoking_pattern_logs 대체)
+ */
 router.post("/logs", async (req, res, next) => {
   try {
     const userId = req.user.id;
     const b = req.body ?? {};
-    const action = String(b.action ?? "").trim().toLowerCase();
-    if (action !== "smoked" && action !== "craving") {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "action must be smoked|craving" });
+
+    const action = String(b.action ?? "")
+      .trim()
+      .toLowerCase();
+    const allowed = new Set(["smoked", "craving", "sos_pressed"]);
+    if (!allowed.has(action)) {
+      return res.status(400).json({
+        error: "BAD_REQUEST",
+        message: "action must be smoked | craving | sos_pressed",
+      });
     }
 
     const eventAtMs = asInt(b.eventAtMs, Date.now());
     const eventAt = new Date(eventAtMs);
-    const hour = Math.max(0, Math.min(23, asInt(b.hour, eventAt.getHours())));
-    const minute = Math.max(0, Math.min(59, asInt(b.minute, eventAt.getMinutes())));
-    const timeLabel = String(b.timeLabel ?? "").trim();
-    const situation = String(b.situation ?? "").trim();
-    const emotion = String(b.emotion ?? "").trim();
+    const note =
+      typeof b.note === "string" ? b.note.trim().slice(0, 200) : null;
 
-    const { error } = await supabaseAdmin.from("smoking_pattern_logs").insert({
+    const { error } = await supabaseAdmin.from("smoking_events").insert({
       user_id: userId,
-      action,
+      event_type: action,
       event_at: eventAt.toISOString(),
-      event_hour: hour,
-      event_minute: minute,
-      time_label: timeLabel,
-      situation,
-      emotion,
+      note: note || null,
     });
     if (error) throw error;
+
     return res.status(200).json({ ok: true });
   } catch (err) {
     return next(err);
   }
 });
 
+/**
+ * GET /v1/smoking-patterns/logs?limit=50
+ */
 router.get("/logs", async (req, res, next) => {
   try {
     const userId = req.user.id;
     const limit = Math.max(1, Math.min(200, asInt(req.query.limit, 50)));
+
     const { data, error } = await supabaseAdmin
-      .from("smoking_pattern_logs")
-      .select("id, action, event_at, event_hour, event_minute, time_label, situation, emotion, created_at")
+      .from("smoking_events")
+      .select("id, event_type, event_at, note, created_at")
       .eq("user_id", userId)
       .order("event_at", { ascending: false })
       .limit(limit);
     if (error) throw error;
+
     return res.status(200).json({ ok: true, logs: data ?? [] });
   } catch (err) {
     return next(err);
   }
 });
 
+/**
+ * GET /v1/smoking-patterns/settings
+ */
 router.get("/settings", async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -78,20 +88,28 @@ router.get("/settings", async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /v1/smoking-patterns/settings
+ * body: { patternReminderEnabled: boolean }
+ */
 router.put("/settings", async (req, res, next) => {
   try {
     const userId = req.user.id;
     const value = req.body?.patternReminderEnabled;
-    const enabled = value === false || value === 0 || value === "false" ? false : true;
-    const { error } = await supabaseAdmin.from("notification_settings").upsert(
-      {
-        user_id: userId,
-        pattern_reminder_enabled: enabled,
-      },
-      { onConflict: "user_id" },
-    );
+    const enabled =
+      value === false || value === 0 || value === "false" ? false : true;
+
+    const { error } = await supabaseAdmin
+      .from("notification_settings")
+      .upsert(
+        { user_id: userId, pattern_reminder_enabled: enabled },
+        { onConflict: "user_id" },
+      );
     if (error) throw error;
-    return res.status(200).json({ ok: true, patternReminderEnabled: enabled });
+
+    return res
+      .status(200)
+      .json({ ok: true, patternReminderEnabled: enabled });
   } catch (err) {
     return next(err);
   }

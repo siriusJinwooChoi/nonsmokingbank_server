@@ -26,34 +26,6 @@ export const env = {
   supabaseAnonKey: readEnv("SUPABASE_ANON_KEY"),
   jwtIssuer: readEnv("JWT_ISSUER"),
   jwtAudience: String(readEnv("JWT_AUDIENCE", "authenticated")).trim() || "authenticated",
-  /** 일일 게임 보상 1회 지급 코인 (Render 등에서 조정) */
-  gameRewardCoinsPerClaim: readIntEnv("GAME_REWARD_COINS_PER_CLAIM", 2, 1, 500),
-  /** 보상 claim 시 허용하는 game_stats.stats_updated_at 최대 경과(분) */
-  gameStatsFreshMinutes: readIntEnv("GAME_STATS_FRESH_MINUTES", 25, 5, 1440),
-  /** 단어 게임 보상에 필요한 최소 레벨(서버 저장 레벨과 proof 일치 + 이 값 이상) */
-  wordGameMinLevelForReward: readIntEnv("WORD_GAME_MIN_LEVEL_FOR_REWARD", 2, 2, 100),
-  /** 완벽 타이밍 보상에 필요한 최소 최고 점수 */
-  timingTapMinBestScoreForReward: readIntEnv("TIMING_TAP_MIN_BEST_SCORE_FOR_REWARD", 1, 1, 10_000_000),
-  /** 담배맞추기 보상에 필요한 최소 최고 점수 */
-  cigaretteCatchMinBestScoreForReward: readIntEnv(
-    "CIGARETTE_CATCH_MIN_BEST_SCORE_FOR_REWARD",
-    1,
-    1,
-    10_000_000,
-  ),
-  /** 세션 종료 기반 일일 보상: 최소 점수(0이면 0점 종료도 허용) */
-  timingTapMinSessionScoreForReward: readIntEnv(
-    "TIMING_TAP_MIN_SESSION_SCORE_FOR_REWARD",
-    0,
-    0,
-    10_000_000,
-  ),
-  cigaretteCatchMinSessionScoreForReward: readIntEnv(
-    "CIGARETTE_CATCH_MIN_SESSION_SCORE_FOR_REWARD",
-    0,
-    0,
-    10_000_000,
-  ),
   /**
    * 앱 원격 에셋(이미지·Lottie) 정적 폴더. 비우면 기본값은 저장소의 public/app-assets (index.js에서 경로 조합).
    */
