@@ -13,14 +13,15 @@ router.get("/onboarding", async (req, res, next) => {
     const userId = req.user.id;
     const { data, error } = await supabaseAdmin
       .from("quit_profile")
-      .select("is_configured, start_time_ms")
+      .select("is_configured, start_time_ms, daily_cigarettes")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw error;
     const configured =
       Boolean(data?.is_configured) &&
       data?.start_time_ms != null &&
-      Number(data.start_time_ms) > 0;
+      Number(data.start_time_ms) > 0 &&
+      Number(data?.daily_cigarettes ?? 0) > 0;
     return res.status(200).json({
       ok: true,
       is_configured: configured,
