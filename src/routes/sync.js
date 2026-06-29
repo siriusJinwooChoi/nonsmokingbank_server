@@ -13,13 +13,17 @@ router.get("/onboarding", async (req, res, next) => {
     const userId = req.user.id;
     const { data, error } = await supabaseAdmin
       .from("quit_profile")
-      .select("is_configured")
+      .select("is_configured, start_time_ms")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw error;
+    const configured =
+      Boolean(data?.is_configured) &&
+      data?.start_time_ms != null &&
+      Number(data.start_time_ms) > 0;
     return res.status(200).json({
       ok: true,
-      is_configured: Boolean(data?.is_configured),
+      is_configured: configured,
     });
   } catch (err) {
     return next(err);
@@ -82,12 +86,15 @@ router.put("/push", async (req, res, next) => {
     // 신규 통합 quit_profile 필드
     if (b.quit_profile) {
       const u = b.quit_profile;
-      const startMs = asInt(u.start_time_ms, Date.now());
+      const isConfigured = Boolean(u.is_configured);
+      const startMs = isConfigured
+        ? asInt(u.start_time_ms, Date.now())
+        : asInt(u.start_time_ms, 0);
       const lungLast = asInt(u.lung_last_updated_ms, startMs);
       const { error } = await supabaseAdmin.from("quit_profile").upsert(
         {
           user_id: userId,
-          is_configured: Boolean(u.is_configured),
+          is_configured: isConfigured,
           daily_cigarettes: asInt(u.daily_cigarettes, 0),
           cigarettes_per_pack: asInt(u.cigarettes_per_pack, 20),
           price_per_pack: asInt(u.price_per_pack, 4500),
@@ -115,12 +122,15 @@ router.put("/push", async (req, res, next) => {
     if (!b.quit_profile && (b.user_settings || b.quit_progress)) {
       const u = b.user_settings ?? {};
       const q = b.quit_progress ?? {};
-      const startMs = asInt(q.start_time_ms, Date.now());
+      const isConfigured = Boolean(u.is_configured);
+      const startMs = isConfigured
+        ? asInt(q.start_time_ms, Date.now())
+        : asInt(q.start_time_ms, 0);
       const lungLast = asInt(q.lung_last_updated_ms, startMs);
       const { error } = await supabaseAdmin.from("quit_profile").upsert(
         {
           user_id: userId,
-          is_configured: Boolean(u.is_configured),
+          is_configured: isConfigured,
           daily_cigarettes: asInt(u.daily_cigarettes, 0),
           cigarettes_per_pack: asInt(u.cigarettes_per_pack, 20),
           price_per_pack: asInt(u.price_per_pack, 4500),
