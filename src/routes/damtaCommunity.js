@@ -34,6 +34,51 @@ function prunePresence() {
   }
 }
 
+/** 레거시 스키마(content)와 신규 스키마(text) 모두 지원 */
+function pickDamtaText(row) {
+  const fromText = typeof row?.text === "string" ? row.text.trim() : "";
+  if (fromText) return fromText;
+  const fromContent =
+    typeof row?.content === "string" ? row.content.trim() : "";
+  return fromContent;
+}
+
+function damtaInsertPayload({ userId, text, color, authorName }) {
+  const payload = {
+    user_id: userId ?? null,
+    text,
+    color,
+    author_name: authorName,
+  };
+  // 구 테이블: content NOT NULL 인 경우가 있어 동일 값을 함께 넣는다.
+  payload.content = text;
+  return payload;
+}
+
+function mapDamtaDbError(err) {
+  const code = err?.code;
+  const message = err?.message ?? "Database error";
+  if (code === "42P01") {
+    return {
+      status: 503,
+      body: {
+        error: "TABLE_MISSING",
+        message: "damta_messages table is missing. Run DB migration.",
+      },
+    };
+  }
+  if (code === "42703" || code === "23502") {
+    return {
+      status: 503,
+      body: {
+        error: "SCHEMA_MISMATCH",
+        message,
+      },
+    };
+  }
+  return null;
+}
+
 /**
  * GET /v1/community/damta/messages
  * 현재 서울 기준 주(월~일)의 최근 50건을 DB에서 반환
@@ -45,7 +90,7 @@ router.get("/messages", async (req, res, next) => {
 
     const { data, error } = await supabaseAdmin
       .from("damta_messages")
-      .select("id, user_id, text, color, author_name, created_at")
+      .select("id, user_id, text, content, color, author_name, created_at")
       .gte("created_at", weekStartIso)
       .order("created_at", { ascending: true })
       .limit(50);
@@ -53,7 +98,7 @@ router.get("/messages", async (req, res, next) => {
 
     const items = (data ?? []).map((row) => ({
       id: row.id,
-      text: row.text,
+      text: pickDamtaText(row),
       color: row.color,
       ts: new Date(row.created_at).getTime(),
       authorName: row.author_name,
@@ -138,19 +183,21 @@ router.post("/messages", async (req, res, next) => {
 
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from("damta_messages")
-      .insert({
-        user_id: userId ?? null,
-        text,
-        color,
-        author_name: authorName,
-      })
-      .select("id, text, color, author_name, created_at")
+      .insert(damtaInsertPayload({ userId, text, color, authorName }))
+      .select("id, text, content, color, author_name, created_at")
       .single();
-    if (insErr) throw insErr;
+    if (insErr) {
+      const mapped = mapDamtaDbError(insErr);
+      if (mapped) {
+        console.error("[damta] insert failed:", insErr);
+        return res.status(mapped.status).json(mapped.body);
+      }
+      throw insErr;
+    }
 
     const item = {
       id: inserted.id,
-      text: inserted.text,
+      text: pickDamtaText(inserted),
       color: inserted.color,
       ts: new Date(inserted.created_at).getTime(),
       authorName: inserted.author_name,

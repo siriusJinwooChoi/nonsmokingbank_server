@@ -8,12 +8,14 @@ CREATE TABLE IF NOT EXISTS public.damta_messages (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 기존 테이블에 user_id 등 누락 컬럼 추가
 ALTER TABLE public.damta_messages
   ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES auth.users (id) ON DELETE SET NULL;
 
 ALTER TABLE public.damta_messages
   ADD COLUMN IF NOT EXISTS text text;
+
+ALTER TABLE public.damta_messages
+  ADD COLUMN IF NOT EXISTS content text;
 
 ALTER TABLE public.damta_messages
   ADD COLUMN IF NOT EXISTS color text;
@@ -24,7 +26,6 @@ ALTER TABLE public.damta_messages
 ALTER TABLE public.damta_messages
   ADD COLUMN IF NOT EXISTS created_at timestamptz;
 
--- 레거시 컬럼명 보정 (message → text, author_id → user_id)
 DO $$
 BEGIN
   IF EXISTS (
@@ -37,6 +38,22 @@ BEGIN
     UPDATE public.damta_messages
     SET text = message
     WHERE (text IS NULL OR text = '') AND message IS NOT NULL;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'damta_messages' AND column_name = 'content'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'damta_messages' AND column_name = 'text'
+  ) THEN
+    UPDATE public.damta_messages
+    SET text = content
+    WHERE (text IS NULL OR text = '') AND content IS NOT NULL;
+
+    UPDATE public.damta_messages
+    SET content = text
+    WHERE (content IS NULL OR content = '') AND text IS NOT NULL;
   END IF;
 
   IF EXISTS (
