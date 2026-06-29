@@ -22,7 +22,17 @@ function toRoomResponse(room, { memberCount, myNickname, myRole } = {}) {
     created_at: room.created_at,
     my_nickname: myNickname ?? null,
     my_role: myRole ?? null,
+    is_admin: myRole === "owner",
   };
+}
+
+/** 방의 멤버 수가 0이면 방과 모든 게시물을 삭제 */
+async function deleteRoomIfEmpty(roomId) {
+  const count = await countMembers(roomId);
+  if (count === 0) {
+    await supabaseAdmin.from("quit_room_posts").delete().eq("room_id", roomId);
+    await supabaseAdmin.from("quit_rooms").delete().eq("id", roomId);
+  }
 }
 
 async function countMembers(roomId) {
@@ -233,8 +243,110 @@ router.post("/join", async (req, res, next) => {
 });
 
 /**
+ * GET /v1/quit-rooms/:roomId/members
+ * 방 멤버 전체 목록 조회 (멤버만 접근 가능)
+ */
+router.get("/:roomId/members", async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { roomId } = req.params;
+
+    // 해당 방의 멤버인지 확인
+    const { data: myMembership } = await supabaseAdmin
+      .from("quit_room_members")
+      .select("role")
+      .eq("room_id", roomId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!myMembership) {
+      return res.status(403).json({ error: "FORBIDDEN" });
+    }
+
+    // 방의 creator_id 조회 (is_admin 판별용)
+    const { data: room, error: roomErr } = await supabaseAdmin
+      .from("quit_rooms")
+      .select("creator_id")
+      .eq("id", roomId)
+      .maybeSingle();
+    if (roomErr) throw roomErr;
+    if (!room) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    // 전체 멤버 목록
+    const { data: members, error: memErr } = await supabaseAdmin
+      .from("quit_room_members")
+      .select("user_id, nickname, role, joined_at")
+      .eq("room_id", roomId)
+      .order("joined_at", { ascending: true });
+    if (memErr) throw memErr;
+
+    const result = (members ?? []).map((m) => ({
+      nickname: m.nickname,
+      role: m.role,
+      is_admin: m.role === "owner" || m.user_id === room.creator_id,
+      joined_at: m.joined_at,
+    }));
+
+    return res.status(200).json({ ok: true, members: result });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/**
+ * DELETE /v1/quit-rooms/:roomId
+ * 방 전체 삭제 (관리자/오너 전용) — 모든 멤버 강제 퇴장 + 게시물 삭제
+ */
+router.delete("/:roomId", async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { roomId } = req.params;
+
+    // 방 존재 여부 및 creator 확인
+    const { data: room, error: roomErr } = await supabaseAdmin
+      .from("quit_rooms")
+      .select("id, creator_id")
+      .eq("id", roomId)
+      .maybeSingle();
+    if (roomErr) throw roomErr;
+    if (!room) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    // 관리자(creator)만 삭제 가능
+    if (room.creator_id !== userId) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Only the room admin can delete the room" });
+    }
+
+    // 게시물 삭제 → 멤버 삭제 → 방 삭제
+    const { error: postsErr } = await supabaseAdmin
+      .from("quit_room_posts")
+      .delete()
+      .eq("room_id", roomId);
+    if (postsErr) throw postsErr;
+
+    const { error: membersErr } = await supabaseAdmin
+      .from("quit_room_members")
+      .delete()
+      .eq("room_id", roomId);
+    if (membersErr) throw membersErr;
+
+    const { error: deleteErr } = await supabaseAdmin
+      .from("quit_rooms")
+      .delete()
+      .eq("id", roomId);
+    if (deleteErr) throw deleteErr;
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/**
  * DELETE /v1/quit-rooms/:roomId/leave
- * 방 나가기 (오너면 방 전체 삭제)
+ * 방 나가기 — 마지막 멤버가 나가면 방 자동 삭제
  */
 router.delete("/:roomId/leave", async (req, res, next) => {
   try {
@@ -251,7 +363,10 @@ router.delete("/:roomId/leave", async (req, res, next) => {
       return res.status(404).json({ error: "NOT_FOUND" });
     }
 
+    // 오너가 나가는 경우: 방 전체 삭제 (기존 동작 유지)
     if (room.creator_id === userId) {
+      await supabaseAdmin.from("quit_room_posts").delete().eq("room_id", roomId);
+      await supabaseAdmin.from("quit_room_members").delete().eq("room_id", roomId);
       const { error } = await supabaseAdmin
         .from("quit_rooms")
         .delete()
@@ -260,12 +375,16 @@ router.delete("/:roomId/leave", async (req, res, next) => {
       return res.status(200).json({ ok: true, deleted_room: true });
     }
 
+    // 일반 멤버가 나가는 경우
     const { error: leaveErr } = await supabaseAdmin
       .from("quit_room_members")
       .delete()
       .eq("room_id", roomId)
       .eq("user_id", userId);
     if (leaveErr) throw leaveErr;
+
+    // 나간 후 남은 멤버가 0명이면 방 자동 삭제
+    await deleteRoomIfEmpty(roomId);
 
     return res.status(200).json({ ok: true, deleted_room: false });
   } catch (err) {
