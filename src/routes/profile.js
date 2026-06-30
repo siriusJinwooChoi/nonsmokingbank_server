@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { deleteAllQuitRoomImagesForUser } from "../lib/quitRoomImageStorage.js";
 
 const router = Router();
 
@@ -109,6 +110,8 @@ router.patch("/", async (req, res, next) => {
 router.delete("/account", async (req, res, next) => {
   try {
     const userId = req.user.id;
+
+    await deleteAllQuitRoomImagesForUser(userId);
 
     // 신규 스키마 기준으로 사용자 데이터 정리
     const cleanupTasks = [

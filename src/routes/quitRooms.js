@@ -1,7 +1,11 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
-import { uploadQuitRoomImage } from "../lib/quitRoomImageStorage.js";
+import { uploadQuitRoomImage, deleteQuitRoomImageByUrl } from "../lib/quitRoomImageStorage.js";
+import {
+  assertQuitRoomImageUploadAllowed,
+  deleteQuitRoomCompletely,
+} from "../lib/quitRoomRetention.js";
 
 const router = Router();
 
@@ -26,12 +30,11 @@ function toRoomResponse(room, { memberCount, myNickname, myRole } = {}) {
   };
 }
 
-/** 방의 멤버 수가 0이면 방과 모든 게시물을 삭제 */
+/** 방의 멤버 수가 0이면 방과 모든 게시물·이미지를 삭제 */
 async function deleteRoomIfEmpty(roomId) {
   const count = await countMembers(roomId);
   if (count === 0) {
-    await supabaseAdmin.from("quit_room_posts").delete().eq("room_id", roomId);
-    await supabaseAdmin.from("quit_rooms").delete().eq("id", roomId);
+    await deleteQuitRoomCompletely(roomId);
   }
 }
 
@@ -319,24 +322,7 @@ router.delete("/:roomId", async (req, res, next) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Only the room admin can delete the room" });
     }
 
-    // 게시물 삭제 → 멤버 삭제 → 방 삭제
-    const { error: postsErr } = await supabaseAdmin
-      .from("quit_room_posts")
-      .delete()
-      .eq("room_id", roomId);
-    if (postsErr) throw postsErr;
-
-    const { error: membersErr } = await supabaseAdmin
-      .from("quit_room_members")
-      .delete()
-      .eq("room_id", roomId);
-    if (membersErr) throw membersErr;
-
-    const { error: deleteErr } = await supabaseAdmin
-      .from("quit_rooms")
-      .delete()
-      .eq("id", roomId);
-    if (deleteErr) throw deleteErr;
+    await deleteQuitRoomCompletely(roomId);
 
     return res.status(200).json({ ok: true });
   } catch (err) {
@@ -365,13 +351,7 @@ router.delete("/:roomId/leave", async (req, res, next) => {
 
     // 오너가 나가는 경우: 방 전체 삭제 (기존 동작 유지)
     if (room.creator_id === userId) {
-      await supabaseAdmin.from("quit_room_posts").delete().eq("room_id", roomId);
-      await supabaseAdmin.from("quit_room_members").delete().eq("room_id", roomId);
-      const { error } = await supabaseAdmin
-        .from("quit_rooms")
-        .delete()
-        .eq("id", roomId);
-      if (error) throw error;
+      await deleteQuitRoomCompletely(roomId);
       return res.status(200).json({ ok: true, deleted_room: true });
     }
 
@@ -412,7 +392,7 @@ router.get("/:roomId/posts", async (req, res, next) => {
     }
 
     const limit = Math.min(
-      200,
+      100,
       Math.max(1, parseInt(req.query.limit ?? "50", 10)),
     );
 
@@ -468,6 +448,15 @@ router.post("/:roomId/posts", async (req, res, next) => {
 
     // base64 이미지 → Supabase Storage 업로드 후 URL 저장
     if (!imageUrl && req.body?.image_base64) {
+      try {
+        await assertQuitRoomImageUploadAllowed(roomId, userId);
+      } catch (limitErr) {
+        const status = limitErr.status ?? 429;
+        return res.status(status).json({
+          error: limitErr.code ?? "IMAGE_UPLOAD_LIMIT",
+          message: limitErr.message ?? "Image upload limit exceeded",
+        });
+      }
       const contentType =
         typeof req.body?.image_content_type === "string"
           ? req.body.image_content_type.trim()
@@ -531,7 +520,7 @@ router.delete("/:roomId/posts/:postId", async (req, res, next) => {
 
     const { data: post, error: fetchErr } = await supabaseAdmin
       .from("quit_room_posts")
-      .select("id, author_id, room_id")
+      .select("id, author_id, room_id, image_url")
       .eq("id", postId)
       .eq("room_id", roomId)
       .maybeSingle();
@@ -539,6 +528,10 @@ router.delete("/:roomId/posts/:postId", async (req, res, next) => {
     if (!post) return res.status(404).json({ error: "NOT_FOUND" });
     if (post.author_id !== userId) {
       return res.status(403).json({ error: "FORBIDDEN" });
+    }
+
+    if (post.image_url) {
+      await deleteQuitRoomImageByUrl(post.image_url);
     }
 
     const { error } = await supabaseAdmin

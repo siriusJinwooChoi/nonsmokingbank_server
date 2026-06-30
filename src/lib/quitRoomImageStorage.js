@@ -1,15 +1,102 @@
 import { supabaseAdmin } from "./supabaseAdmin.js";
 
-const BUCKET = "quit-room-images";
+export const QUIT_ROOM_IMAGES_BUCKET = "quit-room-images";
+const BUCKET = QUIT_ROOM_IMAGES_BUCKET;
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB
 
-// 허용할 MIME type 화이트리스트 (클라이언트 입력값 검증)
+export const QUIT_ROOM_IMAGE_RETENTION_DAYS = 90;
+export const QUIT_ROOM_POST_RETENTION_DAYS = 365;
+export const QUIT_ROOM_MAX_IMAGES_PER_ROOM_PER_MONTH = 300;
+export const QUIT_ROOM_MAX_IMAGES_PER_USER_PER_DAY = 10;
+
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 /**
- * 금연방 게시물 이미지를 Supabase Storage에 업로드하고 공개 URL 반환
- * - contentType은 서버에서 직접 파일 매직 바이트로 재검증
+ * Supabase 공개 URL → Storage 객체 경로 (예: roomId/userId/123.jpg)
  */
+export function storagePathFromPublicUrl(imageUrl) {
+  if (typeof imageUrl !== "string" || !imageUrl.trim()) return null;
+  const url = imageUrl.trim();
+  const publicMarker = `/object/public/${BUCKET}/`;
+  const publicIdx = url.indexOf(publicMarker);
+  if (publicIdx >= 0) {
+    return url.slice(publicIdx + publicMarker.length).split("?")[0];
+  }
+  const shortMarker = `/${BUCKET}/`;
+  const shortIdx = url.indexOf(shortMarker);
+  if (shortIdx >= 0) {
+    return url.slice(shortIdx + shortMarker.length).split("?")[0];
+  }
+  return null;
+}
+
+/** 단일 이미지 삭제 (없어도 무시) */
+export async function deleteQuitRoomImageByUrl(imageUrl) {
+  const path = storagePathFromPublicUrl(imageUrl);
+  if (!path) return;
+  const { error } = await supabaseAdmin.storage.from(BUCKET).remove([path]);
+  if (error && !/not found/i.test(error.message ?? "")) {
+    console.warn("[quitRoomImageStorage] delete failed:", path, error.message);
+  }
+}
+
+/** 방 폴더(roomId/**) 아래 모든 이미지 삭제 */
+export async function deleteAllQuitRoomImagesForRoom(roomId) {
+  if (!roomId) return;
+
+  const paths = [];
+  const { data: userEntries, error: listErr } = await supabaseAdmin.storage
+    .from(BUCKET)
+    .list(roomId, { limit: 1000 });
+  if (listErr) {
+    console.warn(
+      "[quitRoomImageStorage] list room failed:",
+      roomId,
+      listErr.message,
+    );
+    return;
+  }
+
+  for (const entry of userEntries ?? []) {
+    const userId = entry?.name;
+    if (!userId) continue;
+    const prefix = `${roomId}/${userId}`;
+    const { data: files, error: fileErr } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .list(prefix, { limit: 1000 });
+    if (fileErr) continue;
+    for (const file of files ?? []) {
+      if (file?.name) paths.push(`${prefix}/${file.name}`);
+    }
+  }
+
+  if (paths.length === 0) return;
+  const { error } = await supabaseAdmin.storage.from(BUCKET).remove(paths);
+  if (error) {
+    console.warn(
+      "[quitRoomImageStorage] bulk delete failed:",
+      roomId,
+      error.message,
+    );
+  }
+}
+
+/** 사용자가 올린 이미지 URL 기준 일괄 삭제 (계정 삭제 시) */
+export async function deleteAllQuitRoomImagesForUser(userId) {
+  if (!userId) return;
+  const { data: posts, error } = await supabaseAdmin
+    .from("quit_room_posts")
+    .select("image_url")
+    .eq("author_id", userId)
+    .not("image_url", "is", null);
+  if (error) throw error;
+  for (const row of posts ?? []) {
+    if (row.image_url) {
+      await deleteQuitRoomImageByUrl(row.image_url);
+    }
+  }
+}
+
 export async function uploadQuitRoomImage({
   roomId,
   userId,
@@ -29,7 +116,6 @@ export async function uploadQuitRoomImage({
     throw Object.assign(new Error("Image too large (max 5MB)"), { status: 413 });
   }
 
-  // 파일 매직 바이트로 실제 이미지 타입 검증 (클라이언트 입력 무시)
   const detectedType = detectMimeFromBuffer(buffer);
   if (!detectedType) {
     throw Object.assign(
@@ -59,19 +145,12 @@ export async function uploadQuitRoomImage({
   return data.publicUrl;
 }
 
-/**
- * 파일 매직 바이트로 MIME 타입 감지 (화이트리스트 방식)
- * @param {Buffer} buf
- * @returns {string|null}
- */
 function detectMimeFromBuffer(buf) {
   if (buf.length < 4) return null;
 
-  // JPEG: FF D8 FF
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
     return "image/jpeg";
   }
-  // PNG: 89 50 4E 47 0D 0A 1A 0A
   if (
     buf[0] === 0x89 &&
     buf[1] === 0x50 &&
@@ -80,7 +159,6 @@ function detectMimeFromBuffer(buf) {
   ) {
     return "image/png";
   }
-  // WebP: 52 49 46 46 ?? ?? ?? ?? 57 45 42 50
   if (
     buf.length >= 12 &&
     buf[0] === 0x52 &&

@@ -35,6 +35,15 @@ export const env = {
   /** true 이면 매 분 KST로 reminder_times_json 일치 시 FCM 전송 */
   enableFcmReminderCron: readEnv("ENABLE_FCM_REMINDER_CRON", "false") === "true",
   fcmReminderCronIntervalMs: readIntEnv("FCM_REMINDER_CRON_INTERVAL_MS", 15000, 5000, 120000),
+  /** true 이면 금연방 이미지 90일·글 365일 보관 정리 크론 실행 */
+  enableQuitRoomRetentionCron:
+    readEnv("ENABLE_QUIT_ROOM_RETENTION_CRON", "true") === "true",
+  quitRoomRetentionCronIntervalMs: readIntEnv(
+    "QUIT_ROOM_RETENTION_CRON_INTERVAL_MS",
+    60 * 60 * 1000,
+    60_000,
+    24 * 60 * 60 * 1000,
+  ),
   /**
    * 네이티브 Sign in with Apple → GoTrue `grant_type=id_token` 시 `client_id`.
    * identityToken JWT의 `aud`와 동일해야 함(일반적으로 Xcode 번들 ID).
