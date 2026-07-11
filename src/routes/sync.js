@@ -92,6 +92,9 @@ router.put("/push", async (req, res, next) => {
         ? asInt(u.start_time_ms, Date.now())
         : asInt(u.start_time_ms, 0);
       const lungLast = asInt(u.lung_last_updated_ms, startMs);
+      const quitModeRaw = u.quit_mode;
+      const quitMode =
+        quitModeRaw === "restart" ? "restart" : "continuous";
       const { error } = await supabaseAdmin.from("quit_profile").upsert(
         {
           user_id: userId,
@@ -112,6 +115,15 @@ router.put("/push", async (req, res, next) => {
           lung_health: asInt(u.lung_health, 100),
           lung_last_updated_ms: lungLast,
           pinned_reason_text: u.pinned_reason_text ?? null,
+          quit_mode: quitMode,
+          quit_mode_changed_at_ms:
+            u.quit_mode_changed_at_ms == null
+              ? null
+              : asInt(u.quit_mode_changed_at_ms, 0),
+          origin_start_time_ms:
+            u.origin_start_time_ms == null
+              ? startMs
+              : asInt(u.origin_start_time_ms, startMs),
           updated_at: new Date().toISOString(),
         },
         { onConflict: "user_id" },
