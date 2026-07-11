@@ -44,6 +44,15 @@ export const env = {
     60_000,
     24 * 60 * 60 * 1000,
   ),
+  /** true 이면 매 분 KST 월요일 09:00 금연방 주간 레포트 post 자동 생성 */
+  enableQuitRoomWeeklyReportCron:
+    readEnv("ENABLE_QUIT_ROOM_WEEKLY_REPORT_CRON", "true") === "true",
+  quitRoomWeeklyReportCronIntervalMs: readIntEnv(
+    "QUIT_ROOM_WEEKLY_REPORT_CRON_INTERVAL_MS",
+    60_000,
+    15_000,
+    120_000,
+  ),
   /**
    * 네이티브 Sign in with Apple → GoTrue `grant_type=id_token` 시 `client_id`.
    * identityToken JWT의 `aud`와 동일해야 함(일반적으로 Xcode 번들 ID).

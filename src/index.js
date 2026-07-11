@@ -11,6 +11,7 @@ import v1Router from "./routes/v1.js";
 import { createAssetsManifestRouter } from "./routes/assets.js";
 import { startFcmDailyReminderCron } from "./jobs/fcmDailyReminderCron.js";
 import { startQuitRoomImageRetentionCron } from "./jobs/quitRoomImageRetentionCron.js";
+import { startQuitRoomWeeklyReportCron } from "./jobs/quitRoomWeeklyReportCron.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,5 +118,6 @@ app.listen(port, "0.0.0.0", () => {
   console.log(`[nonsmokingbank-api] static assets from ${assetsRoot}`);
   startFcmDailyReminderCron();
   startQuitRoomImageRetentionCron();
+  startQuitRoomWeeklyReportCron();
 });
 
