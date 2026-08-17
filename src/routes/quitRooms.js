@@ -17,7 +17,7 @@ import {
   weekRangeInSeoul,
   ymdInSeoul,
 } from "../lib/quitRoomHelpers.js";
-import { sendQuitRoomSosFcm } from "../lib/quitRoomFcm.js";
+import { sendQuitRoomPostFcm } from "../lib/quitRoomFcm.js";
 
 const router = Router();
 
@@ -901,19 +901,19 @@ router.post("/:roomId/posts", async (req, res, next) => {
 
     const formatted = formatPostRow(post, {});
 
-    if (postType === "sos") {
-      const { data: roomRow } = await supabaseAdmin
-        .from("quit_rooms")
-        .select("name")
-        .eq("id", roomId)
-        .maybeSingle();
-      sendQuitRoomSosFcm({
-        roomId,
-        roomName: roomRow?.name ?? "금연방",
-        authorNickname: mem.nickname,
-        excludeUserId: userId,
-      }).catch((e) => console.warn("[quitRooms] SOS FCM:", e?.message ?? e));
-    }
+    const { data: roomRow } = await supabaseAdmin
+      .from("quit_rooms")
+      .select("name")
+      .eq("id", roomId)
+      .maybeSingle();
+    sendQuitRoomPostFcm({
+      roomId,
+      roomName: roomRow?.name ?? "금연방",
+      authorNickname: mem.nickname,
+      excludeUserId: userId,
+      postType,
+      content: finalContent,
+    }).catch((e) => console.warn("[quitRooms] post FCM:", e?.message ?? e));
 
     return res.status(201).json({ ok: true, post: formatted });
   } catch (err) {

@@ -1,14 +1,38 @@
 import { supabaseAdmin } from "./supabaseAdmin.js";
 import { getFirebaseAdminApp } from "./firebaseAdmin.js";
 
+function notificationText(postType, authorNickname, content) {
+  const text = typeof content === "string" ? content.trim().replace(/\s+/g, " ") : "";
+  const clipped = text.length > 80 ? `${text.slice(0, 77)}...` : text;
+
+  switch (postType) {
+    case "sos":
+      return `${authorNickname}님이 지금 힘들어해요. 응원 한 마디 남겨 주세요 💪`;
+    case "certify":
+      return `${authorNickname}님이 오늘의 금연 인증을 남겼어요 🌱`;
+    case "share":
+      return `${authorNickname}님이 금연 기록을 공유했어요`;
+    case "cheer":
+      return clipped || `${authorNickname}님이 응원을 남겼어요`;
+    case "mission":
+      return `${authorNickname}님이 미션 기록을 남겼어요`;
+    case "damta":
+      return `${authorNickname}님이 담타 기록을 남겼어요`;
+    default:
+      return clipped || `${authorNickname}님이 새 메시지를 남겼어요`;
+  }
+}
+
 /**
- * SOS 게시물 작성 시 동방 멤버(작성자 제외)에게 FCM 전송
+ * 금연방 게시물 작성 시 같은 방 멤버(작성자 제외)에게 FCM 전송
  */
-export async function sendQuitRoomSosFcm({
+export async function sendQuitRoomPostFcm({
   roomId,
   roomName,
   authorNickname,
   excludeUserId,
+  postType,
+  content,
 }) {
   let messaging;
   try {
@@ -34,12 +58,13 @@ export async function sendQuitRoomSosFcm({
     .in("user_id", userIds);
   if (setErr) throw setErr;
 
-  const title = `${roomName} · SOS`;
-  const body = `${authorNickname}님이 지금 힘들어해요. 응원 한 마디 남겨 주세요 💪`;
+  const isSos = postType === "sos";
+  const title = isSos ? `${roomName} · SOS` : roomName;
+  const body = notificationText(postType, authorNickname, content);
 
   let sent = 0;
   for (const row of settings ?? []) {
-    if (row.quit_room_sos_enabled === false) continue;
+    if (isSos && row.quit_room_sos_enabled === false) continue;
     const token = row.fcm_token;
     if (!token || typeof token !== "string") continue;
     try {
@@ -47,14 +72,18 @@ export async function sendQuitRoomSosFcm({
         token,
         notification: { title, body },
         data: {
-          type: "quit_room_sos",
+          type: isSos ? "quit_room_sos" : "quit_room_post",
           room_id: roomId,
         },
         android: {
           priority: "high",
           notification: {
-            channelId: "quit_room_sos_channel",
             sound: "default",
+          },
+        },
+        apns: {
+          payload: {
+            aps: { sound: "default" },
           },
         },
       });

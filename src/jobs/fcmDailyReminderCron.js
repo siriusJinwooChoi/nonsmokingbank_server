@@ -235,8 +235,8 @@ export async function tickFcmDailyReminders() {
       }
     }
 
-    // 매일 12:01 금연 이유 알림
-    if (reasonNotifOn && hour === 12 && minute === 1 && row.fcm_last_reason_sent_ymd !== todayYmd) {
+    // 매일 12:00 금연 이유 알림
+    if (reasonNotifOn && hour === 12 && minute === 0 && row.fcm_last_reason_sent_ymd !== todayYmd) {
       try {
         const body = reasonBody(reasonMap.get(row.user_id));
         await sendFcm(messaging, token, "🌿 금연할 이유", body, "reason_reminder_channel");
