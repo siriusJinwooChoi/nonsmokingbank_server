@@ -89,7 +89,11 @@ export async function sendQuitRoomPostFcm({
       });
       sent += 1;
     } catch (e) {
-      console.warn("[quitRoomFcm] send failed:", e?.message ?? e);
+      // 원인 구분(APNs 키 미등록·토큰 폐기 등)을 위해 FCM 오류 코드를 함께 남긴다.
+      const code = e?.errorInfo?.code ?? e?.code ?? "unknown";
+      console.warn(
+        `[quitRoomFcm] send failed user=${row.user_id} code=${code}: ${e?.message ?? e}`,
+      );
     }
   }
   return { sent };
