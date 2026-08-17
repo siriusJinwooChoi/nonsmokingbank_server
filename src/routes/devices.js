@@ -12,10 +12,10 @@ router.put("/fcm-token", async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "INVALID_TOKEN" });
     }
 
+    // 신규 가입 등으로 행이 아직 없을 수 있으므로 upsert (update는 0건이어도 성공으로 보임)
     const { error } = await supabaseAdmin
       .from("notification_settings")
-      .update({ fcm_token: token })
-      .eq("user_id", userId);
+      .upsert({ user_id: userId, fcm_token: token }, { onConflict: "user_id" });
 
     if (error) throw error;
     return res.status(200).json({ ok: true });
